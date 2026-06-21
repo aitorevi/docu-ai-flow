@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+set -e
+
+# Rule: never commit directly to main
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$BRANCH" = "main" ]; then
+  echo "ERROR: Direct commits to 'main' are not allowed."
+  echo "       Create a feature branch: git checkout -b feat/your-feature"
+  exit 1
+fi
+
+# Rule: commit message must be in English (basic check — no non-ASCII in first line)
+COMMIT_MSG_FILE=".git/COMMIT_EDITMSG"
+if [ -f "$COMMIT_MSG_FILE" ]; then
+  FIRST_LINE=$(head -1 "$COMMIT_MSG_FILE")
+  if LC_ALL=C grep -q '[^ -~]' <<< "$FIRST_LINE"; then
+    echo "ERROR: Commit message must be in English (ASCII only in first line)."
+    echo "       Got: $FIRST_LINE"
+    exit 1
+  fi
+fi
+
+echo "pre-commit checks passed."

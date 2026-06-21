@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Secrets — copy .env.example → .env and fill in values
+.env
+
+# .NET
+**/bin/
+**/obj/
+**/*.user
+
+# Runtime data (kept via .gitkeep, actual content excluded)
+data/*.db
+data/*.jsonl
+data/output/*.xlsx
+data/output/*.zip
+data/inbox/*.pdf
+data/archive/
+data/failed/
+
+# Stale dev artefact — app now resolves paths from repo root
+src/InvoiceProcessor.Worker/data/
+
+# Local IDE / agent settings
+.claude/settings.local.json
+.idea/
+
+# Invoice data archives
+invoice-data.zip

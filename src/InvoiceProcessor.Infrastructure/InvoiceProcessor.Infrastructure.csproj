@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+    <PackageReference Include="Google.Cloud.DocumentAI.V1" Version="3.25.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
+    <!-- Override the native SQLite library to a patched build; Microsoft.Data.Sqlite 10.0.9
+         pulls in the vulnerable SQLitePCLRaw.lib.e_sqlite3 2.1.11 (NU1903, GHSA-2m69-gcr7-jv3q). -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.*" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="InvoiceProcessor.Integration.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\InvoiceProcessor.Application\InvoiceProcessor.Application.csproj" />
+    <ProjectReference Include="..\InvoiceProcessor.Domain\InvoiceProcessor.Domain.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,13 @@
+﻿{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "InvoiceProcessor.Worker": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "workingDirectory": "../../..",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}

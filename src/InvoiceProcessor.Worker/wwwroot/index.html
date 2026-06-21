@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Procesador de Facturas</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f4f5;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 32px 16px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.08);
+      width: 100%;
+      max-width: 480px;
+      overflow: hidden;
+    }
+    .header {
+      background: #1e40af;
+      padding: 24px 28px;
+      color: #fff;
+    }
+    .header h1 { font-size: 20px; font-weight: 600; }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      font-size: 13px;
+      color: rgba(255,255,255,.8);
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #86efac;
+      flex-shrink: 0;
+    }
+    .section {
+      padding: 24px 28px;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .section:last-of-type { border-bottom: none; }
+    .section h2 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #111827;
+      margin-bottom: 14px;
+    }
+    .row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    .field { flex: 1; }
+    .field label {
+      display: block;
+      font-size: 12px;
+      color: #6b7280;
+      margin-bottom: 4px;
+    }
+    select {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+      color: #111827;
+      background: #fff;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' fill='none'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 28px;
+      cursor: pointer;
+    }
+    select:focus { outline: 2px solid #1e40af; outline-offset: 1px; }
+    button {
+      padding: 8px 18px;
+      background: #1e40af;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .15s;
+    }
+    button:hover { background: #1d3a9f; }
+    button:disabled { background: #9ca3af; cursor: not-allowed; }
+    .log {
+      margin: 0 28px 24px;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 12px 14px;
+      font-size: 13px;
+      color: #374151;
+      min-height: 60px;
+      max-height: 180px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+    .log p { margin: 2px 0; }
+    .log .ok { color: #15803d; }
+    .log .err { color: #b91c1c; }
+    .log .info { color: #6b7280; }
+    .spinner {
+      display: inline-block;
+      width: 12px; height: 12px;
+      border: 2px solid rgba(255,255,255,.5);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="header">
+    <h1>Procesador de Facturas</h1>
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <span id="status-text">Comprobando...</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Exportar Excel</h2>
+    <div class="row">
+      <div class="field">
+        <label for="exp-year">Año</label>
+        <select id="exp-year"></select>
+      </div>
+      <div class="field">
+        <label for="exp-quarter">Trimestre</label>
+        <select id="exp-quarter">
+          <option value="1">T1</option>
+          <option value="2">T2</option>
+          <option value="3">T3</option>
+          <option value="4">T4</option>
+        </select>
+      </div>
+      <button id="btn-export">Exportar</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Enviar al asesor</h2>
+    <div class="row">
+      <div class="field">
+        <label for="send-year">Año</label>
+        <select id="send-year"></select>
+      </div>
+      <div class="field">
+        <label for="send-quarter">Trimestre</label>
+        <select id="send-quarter">
+          <option value="1">T1</option>
+          <option value="2">T2</option>
+          <option value="3">T3</option>
+          <option value="4">T4</option>
+        </select>
+      </div>
+      <button id="btn-send">Enviar</button>
+    </div>
+  </div>
+
+  <div class="log" id="log"><p class="info">Esperando acciones...</p></div>
+</div>
+
+<script>
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const currentQuarter = Math.ceil(currentMonth / 3);
+
+  function populateYears(selectId) {
+    const sel = document.getElementById(selectId);
+    for (let y = currentYear + 1; y >= currentYear - 3; y--) {
+      const opt = new Option(y, y);
+      if (y === currentYear) opt.selected = true;
+      sel.add(opt);
+    }
+  }
+
+  function setQuarter(selectId, q) {
+    document.getElementById(selectId).value = q;
+  }
+
+  populateYears('exp-year');
+  populateYears('send-year');
+  setQuarter('exp-quarter', currentQuarter);
+  setQuarter('send-quarter', currentQuarter);
+
+  const log = document.getElementById('log');
+  function addLog(msg, cls = '') {
+    if (log.querySelector('.info')?.textContent === 'Esperando acciones...') log.innerHTML = '';
+    const p = document.createElement('p');
+    if (cls) p.className = cls;
+    p.textContent = msg;
+    log.appendChild(p);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async function checkStatus() {
+    try {
+      const r = await fetch('/api/health');
+      if (r.ok) {
+        document.getElementById('dot').style.background = '#86efac';
+        document.getElementById('status-text').textContent = 'Watcher activo';
+      }
+    } catch {
+      document.getElementById('dot').style.background = '#fca5a5';
+      document.getElementById('status-text').textContent = 'Sin conexión';
+    }
+  }
+
+  async function callApi(url, btn) {
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.innerHTML = '<span class="spinner"></span>Procesando...';
+    try {
+      const r = await fetch(url, { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.title || JSON.stringify(data));
+      return data;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  }
+
+  document.getElementById('btn-export').addEventListener('click', async () => {
+    const year = document.getElementById('exp-year').value;
+    const quarter = document.getElementById('exp-quarter').value;
+    const btn = document.getElementById('btn-export');
+    try {
+      const data = await callApi(`/api/export/${year}/${quarter}`, btn);
+      if (data.nothingNew) {
+        addLog(`Sin facturas nuevas en ${year}-T${quarter}.`, 'info');
+      } else {
+        addLog(`Exportadas ${data.exported} facturas → ${data.filePath}`, 'ok');
+      }
+    } catch (e) {
+      addLog(`Error al exportar: ${e.message}`, 'err');
+    }
+  });
+
+  document.getElementById('btn-send').addEventListener('click', async () => {
+    const year = document.getElementById('send-year').value;
+    const quarter = document.getElementById('send-quarter').value;
+    const btn = document.getElementById('btn-send');
+    try {
+      const data = await callApi(`/api/send/${year}/${quarter}`, btn);
+      if (data.nothingNew) {
+        addLog(`Sin facturas nuevas para enviar en ${year}-T${quarter}.`, 'info');
+      } else {
+        const parts = data.parts > 1 ? ` (${data.parts} partes)` : '';
+        addLog(`Enviadas ${data.sent} facturas al asesor${parts}.`, 'ok');
+      }
+    } catch (e) {
+      addLog(`Error al enviar: ${e.message}`, 'err');
+    }
+  });
+
+  checkStatus();
+  setInterval(checkStatus, 30000);
+</script>
+</body>
+</html>
