@@ -3,6 +3,7 @@
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="Google.Cloud.DocumentAI.V1" Version="3.25.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
+    <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
     <!-- Override the native SQLite library to a patched build; Microsoft.Data.Sqlite 10.0.9
          pulls in the vulnerable SQLitePCLRaw.lib.e_sqlite3 2.1.11 (NU1903, GHSA-2m69-gcr7-jv3q). -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
