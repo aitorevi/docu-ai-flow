@@ -4,6 +4,7 @@ using InvoiceProcessor.Infrastructure.Dispatch;
 using InvoiceProcessor.Infrastructure.Export;
 using InvoiceProcessor.Infrastructure.Extraction.DocumentAi;
 using InvoiceProcessor.Infrastructure.Extraction.LlamaParse;
+using InvoiceProcessor.Infrastructure.Extraction.Templates;
 using InvoiceProcessor.Infrastructure.Files;
 using InvoiceProcessor.Infrastructure.Idempotency;
 using InvoiceProcessor.Infrastructure.Mail;
@@ -24,9 +25,12 @@ public static class DependencyInjection
         services.Configure<GoogleDocumentAiOptions>(configuration.GetSection("GoogleDocumentAi"));
         services.Configure<CompanyOptions>(configuration.GetSection("Company"));
         services.Configure<ExtractionOptions>(configuration.GetSection("Extraction"));
+        services.Configure<TemplateExtractorOptions>(configuration.GetSection("TemplateExtractor"));
         services.Configure<SupplierCatalogOptions>(configuration.GetSection("SupplierCatalog"));
         services.Configure<DatabaseOptions>(configuration.GetSection("Database"));
         services.Configure<ResendOptions>(configuration.GetSection("Resend"));
+
+        services.AddSingleton<IInvoiceTemplateRepository, AppsettingsTemplateRepository>();
 
         services.AddSingleton<IDocumentReader, FileSystemDocumentReader>();
         services.AddSingleton<IDocumentArchiver, FileSystemDocumentArchiver>();

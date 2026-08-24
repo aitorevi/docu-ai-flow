@@ -1,11 +1,13 @@
 using InvoiceProcessor.Application;
 using InvoiceProcessor.Application.Dispatch;
+using InvoiceProcessor.Application.Invoices;
 using InvoiceProcessor.Application.Ports.Inbound;
 using InvoiceProcessor.Application.Ports.Outbound;
 using InvoiceProcessor.Domain.Dispatch;
 using InvoiceProcessor.Infrastructure;
 using InvoiceProcessor.Infrastructure.Extraction.DocumentAi;
-using InvoiceProcessor.Infrastructure.Extraction.LlamaParse;
+using InvoiceProcessor.Infrastructure.Extraction.Ocr;
+using InvoiceProcessor.Infrastructure.Extraction.Templates;
 using InvoiceProcessor.Infrastructure.Mail;
 using InvoiceProcessor.Worker;
 using System.Diagnostics;
@@ -19,13 +21,27 @@ builder.Services
     .AddApplication()
     .AddInfrastructure(builder.Configuration);
 
-// LlamaParseExtractor kept as a proof-of-result reference; no longer bound to IInvoiceDataExtractor.
-builder.Services.AddHttpClient<LlamaParseExtractor>()
-    .AddStandardResilienceHandler();
+// OCR fallback: the real Tesseract shell-out only when TemplateExtractor:OcrFallback:Enabled,
+// otherwise a null object so scanned PDFs behave exactly as if OCR did not exist.
+if (builder.Configuration.GetValue<bool>("TemplateExtractor:OcrFallback:Enabled"))
+    builder.Services.AddSingleton<IOcrTextExtractor, TesseractOcrExtractor>();
+else
+    builder.Services.AddSingleton<IOcrTextExtractor, NullOcrTextExtractor>();
 
+// Both extractors are registered as lazy singletons — neither is constructed until its type is
+// first resolved — so in Template mode the Google client is never built and no credentials are
+// needed. This is the whole point of the port: the choice lives here and nowhere else.
+builder.Services.AddSingleton<TemplateInvoiceExtractor>();
 builder.Services.AddSingleton<GoogleDocumentAiExtractor>();
-builder.Services.AddSingleton<IInvoiceDataExtractor>(sp =>
-    sp.GetRequiredService<GoogleDocumentAiExtractor>());
+
+var activeProvider = ExtractionOptions.ResolveProvider(builder.Configuration["Extraction:Provider"]);
+
+if (activeProvider == ExtractionProvider.DocumentAi)
+    builder.Services.AddSingleton<IInvoiceDataExtractor>(sp =>
+        sp.GetRequiredService<GoogleDocumentAiExtractor>());
+else
+    builder.Services.AddSingleton<IInvoiceDataExtractor>(sp =>
+        sp.GetRequiredService<TemplateInvoiceExtractor>());
 
 builder.Services.AddHttpClient<ResendAdvisorMailSender>()
     .AddStandardResilienceHandler();
@@ -35,6 +51,8 @@ builder.Services.AddSingleton<IAdvisorMailSender>(sp =>
 builder.Services.AddHostedService<FolderWatcherService>();
 
 var app = builder.Build();
+
+app.Logger.LogInformation("Extractor activo: {Provider}", activeProvider);
 
 // CLI mode "master": dotnet run -- master  →  regenerates maestro_facturas.xlsx
 if (args is ["master"])
@@ -80,7 +98,13 @@ if (args is ["export", var ey, var eq] &&
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-app.MapGet("/api/health", () => Results.Ok(new { status = "running" }));
+app.MapGet("/api/health", () => Results.Ok(new
+{
+    status = "running",
+    // Which extractor is actually bound to the port. Worth surfacing: a misconfigured
+    // Extraction:Provider is otherwise invisible until invoices start failing.
+    extractor = activeProvider.ToString(),
+}));
 
 app.MapPost("/api/export/{year:int}/{quarter:int}", async (int year, int quarter,
     IExportQuarterToSpreadsheetUseCase useCase, CancellationToken ct) =>

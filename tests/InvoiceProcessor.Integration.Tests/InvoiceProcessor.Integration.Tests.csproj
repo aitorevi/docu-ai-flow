@@ -19,6 +19,10 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Fixtures\RealInvoices\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The shipped demo templates are tested against generated PDFs, so a broken pattern in
+         appsettings.json fails the build instead of only failing on a user's first run. -->
+    <None Include="..\..\src\InvoiceProcessor.Worker\appsettings.json"
+          Link="Fixtures\worker-appsettings.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\InvoiceProcessor.Domain\InvoiceProcessor.Domain.csproj" />
