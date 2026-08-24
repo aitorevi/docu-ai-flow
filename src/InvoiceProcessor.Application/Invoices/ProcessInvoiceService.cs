@@ -27,6 +27,18 @@ public sealed class ProcessInvoiceService(
         await using var content = await reader.OpenAsync(document, ct);
         var extraction = await extractor.ExtractAsync(content, ct);
 
+        // The extractor understood nothing: no text layer, no matching template, or a mandatory
+        // field it could not parse. Mapping an empty result would only produce a misleading
+        // "missing field" error, so short-circuit with a reason that names the real situation.
+        if (extraction.RequiresManualEntry)
+        {
+            logger.LogInformation(
+                "No se pudo interpretar {File} (sin texto o sin plantilla). Requiere alta manual.",
+                document.FileName);
+            await archiver.ArchiveFailedAsync(document, ct);
+            return new ProcessInvoiceResult(false, null, "Requiere alta manual");
+        }
+
         var mapped = ExtractionToInvoiceMapper.Map(extraction, supplierNormalizer,
             extractionOptions.Value.ConfidenceThreshold);
 

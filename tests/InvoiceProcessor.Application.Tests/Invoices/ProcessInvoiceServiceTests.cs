@@ -84,6 +84,38 @@ public sealed class ProcessInvoiceServiceTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_WhenExtractionRequiresManualEntry_ArchivesFailedWithoutMapping()
+    {
+        // Given — the extractor could not understand the document at all (no text layer, or no
+        // template matched). That is an expected outcome, not a mapping error, and the reason
+        // reported must say so instead of blaming a missing field.
+        _log.WasProcessedAsync(TestDocument.ContentHash, Arg.Any<CancellationToken>())
+            .Returns(false);
+
+        var content = new DocumentContent("test.pdf", "application/pdf", new MemoryStream([1, 2, 3]));
+        _reader.OpenAsync(TestDocument, Arg.Any<CancellationToken>())
+            .Returns(content);
+
+        _extractor.ExtractAsync(content, Arg.Any<CancellationToken>())
+            .Returns(new ExtractionResult(
+                new Dictionary<string, ExtractedField>(), [], 0m, RequiresManualEntry: true));
+
+        _archiver.ArchiveFailedAsync(TestDocument, Arg.Any<CancellationToken>())
+            .Returns("/failed/test.pdf");
+
+        // When
+        var result = await _sut.ExecuteAsync(TestDocument, CancellationToken.None);
+
+        // Then
+        Assert.False(result.Success);
+        Assert.Equal("Requiere alta manual", result.FailureReason);
+        await _archiver.Received(1).ArchiveFailedAsync(TestDocument, Arg.Any<CancellationToken>());
+        await _repository.DidNotReceive().SaveAsync(Arg.Any<StoredInvoice>(), Arg.Any<CancellationToken>());
+        // The supplier normalizer is part of mapping — it must never be reached.
+        _supplierNormalizer.DidNotReceive().Normalize(Arg.Any<string?>(), Arg.Any<string?>());
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WhenMappingSucceeds_SavesInvoiceAndMarksProcessed()
     {
         // Given
