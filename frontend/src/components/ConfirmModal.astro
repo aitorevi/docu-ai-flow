@@ -1,0 +1,53 @@
+---
+// Reusable confirmation dialog. Drop <ConfirmModal /> once per page and call confirmDialog()
+// (from ../scripts/confirmDialog) to open it — it resolves true on Confirm, false otherwise.
+// The markup is static (not innerHTML), so a scoped <style> is enough.
+---
+<div class="confirm-modal" id="confirm-modal" hidden>
+  <div class="confirm-backdrop" data-close></div>
+  <div class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <h3 class="confirm-title" id="confirm-title"></h3>
+    <p class="confirm-message" id="confirm-message"></p>
+    <div class="confirm-actions">
+      <button class="confirm-cancel" type="button">Cancelar</button>
+      <button class="confirm-ok" type="button"></button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .confirm-modal {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .confirm-modal[hidden] { display: none; }
+  .confirm-backdrop {
+    position: absolute; inset: 0;
+    background: rgba(17, 24, 39, .55);
+    animation: confirm-fade .12s ease-out;
+  }
+  .confirm-dialog {
+    position: relative;
+    width: 100%; max-width: 440px;
+    background: #fff; border-radius: 12px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, .2), 0 8px 10px -6px rgba(0, 0, 0, .15);
+    padding: 22px 22px 18px;
+    animation: confirm-pop .14s ease-out;
+  }
+  .confirm-title { margin: 0 0 8px; font-size: 17px; font-weight: 700; color: #111827; }
+  .confirm-message { margin: 0 0 20px; font-size: 14px; line-height: 1.5; color: #4b5563; }
+  .confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+  .confirm-actions button {
+    padding: 9px 18px; font-size: 14px; font-weight: 600; border-radius: 8px;
+    border: none; color: #fff; cursor: pointer;
+  }
+  .confirm-cancel { background: #6b7280; }
+  .confirm-cancel:hover { background: #4b5563; }
+  .confirm-ok { background: #b91c1c; }
+  .confirm-ok:hover { background: #991b1b; }
+  .confirm-ok.is-primary { background: #1e40af; }
+  .confirm-ok.is-primary:hover { background: #1e3a8a; }
+  @keyframes confirm-fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes confirm-pop { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+</style>

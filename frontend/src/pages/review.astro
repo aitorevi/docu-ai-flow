@@ -1,0 +1,737 @@
+---
+import Base from '../layouts/Base.layout.astro';
+import StatusHeader from '../components/StatusHeader.astro';
+import EventLog from '../components/EventLog.astro';
+import ConfirmModal from '../components/ConfirmModal.astro';
+---
+<Base title="Revisar facturas — docu-ai-flow">
+  <div class="card review-card">
+    <StatusHeader title="Revisar facturas" />
+    <div class="blurb-row">
+      <p class="page-blurb">Facturas de proveedores que aún no se han ganado la confianza del sistema. Compara los datos con el PDF y confirma o corrige antes de archivarlas.</p>
+      <span id="queue-count" class="queue-count"></span>
+    </div>
+
+    <div class="section">
+      <div id="review-root">
+        <p class="info">Cargando...</p>
+      </div>
+    </div>
+
+    <EventLog />
+  </div>
+  <ConfirmModal />
+</Base>
+
+<!-- is:global because the review UI is built at runtime via innerHTML (see <script>), which Astro's
+     scoped styles never reach. Every rule is namespaced under .review-card so nothing leaks. -->
+<style is:global>
+  /* ── Near full-width card so the PDF is as large as possible ── */
+  .review-card { max-width: min(2200px, 100%); }
+
+  .review-card .section { padding: 20px 28px; border-top: 1px solid #f3f4f6; }
+  .review-card .blurb-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-right: 28px; }
+  .review-card .queue-count {
+    font-size: 12px; font-weight: 500; color: #1e40af; background: #dbeafe;
+    padding: 3px 10px; border-radius: 999px; white-space: nowrap; flex-shrink: 0;
+  }
+  .review-card .info { color: #6b7280; font-size: 13px; }
+
+  /* ── PDF takes all remaining width; the form is a fixed narrow column ── */
+  .review-card .split { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; }
+  @media (max-width: 820px) { .review-card .split { grid-template-columns: 1fr; } }
+
+  /* ── PDF pane — tall, full-width viewer ── */
+  .review-card .pdf-pane {
+    position: relative;
+    display: flex; flex-direction: column;
+    border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; background: #f9fafb;
+  }
+  .review-card .pdf-loading {
+    position: absolute; inset: 0; z-index: 2;
+    display: flex; align-items: center; justify-content: center;
+    background: #f3f4f6; color: #6b7280; font-size: 14px;
+  }
+  /* The overlay is persistent and toggled with [hidden]; flex would otherwise override display:none. */
+  .review-card .pdf-loading[hidden] { display: none; }
+  .review-card .pdf-pane iframe { width: 100%; height: calc(100vh - 180px); min-height: 620px; border: 0; display: block; }
+  .review-card .pdf-open {
+    display: block; padding: 9px 14px; font-size: 12px; color: #1e40af;
+    text-decoration: none; border-top: 1px solid #e5e7eb; background: #fff;
+  }
+  .review-card .pdf-open:hover { text-decoration: underline; }
+
+  /* ── Form pane ── */
+  .review-card .form-pane { display: flex; flex-direction: column; gap: 0; }
+
+  /* Supplier summary header */
+  .review-card .supplier-header {
+    display: flex; flex-direction: column; gap: 8px;
+    padding-bottom: 16px; border-bottom: 2px solid #e5e7eb; margin-bottom: 2px;
+  }
+  .review-card .supplier-line { font-size: 13px; color: #374151; line-height: 1.5; }
+  .review-card .supplier-line strong { font-size: 15px; font-weight: 600; color: #111827; display: block; }
+  .review-card .supplier-line strong.unidentified { color: #9ca3af; }
+  .review-card .trust-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 999px;
+    font-size: 12px; font-weight: 500;
+    background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe;
+  }
+  .review-card .trust-badge.trusted { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+
+  /* Field groups with section label */
+  .review-card .form-group {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 16px 0; border-bottom: 1px solid #f3f4f6;
+  }
+  .review-card .form-group-label {
+    font-size: 11px; font-weight: 600; color: #9ca3af;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+
+  /* Date fields side by side */
+  .review-card .form-dates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 820px) { .review-card .form-dates { grid-template-columns: 1fr; } }
+
+  /* Individual field rows */
+  .review-card .form-row { display: flex; flex-direction: column; gap: 4px; }
+  .review-card .form-row label { font-size: 12px; font-weight: 500; color: #374151; display: flex; align-items: center; gap: 6px; }
+  .review-card .form-row .conf {
+    font-size: 11px; color: #9ca3af; font-weight: 400;
+    background: #f3f4f6; padding: 1px 5px; border-radius: 3px;
+  }
+  .review-card .form-row input {
+    padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px;
+    font-size: 13px; color: #111827; background: #fff;
+    width: 100%; box-sizing: border-box; transition: border-color .15s;
+  }
+  .review-card .form-row input:focus { outline: none; border-color: #1e40af; box-shadow: 0 0 0 2px #dbeafe; }
+  /* Low-confidence fields the human should double-check. */
+  .review-card .form-row.low-conf input { border-color: #f59e0b; background: #fffbeb; }
+  .review-card .form-row.low-conf .conf { color: #b45309; background: #fef3c7; }
+  /* Fields the template did not capture (e.g. IVA/total on IRPF): disabled + muted, not an error. */
+  .review-card .form-row.not-captured input {
+    background: #f3f4f6; color: #9ca3af; border-color: #e5e7eb; cursor: not-allowed;
+  }
+  .review-card .form-row.not-captured .conf-na {
+    font-size: 11px; font-weight: 400; color: #9ca3af;
+    background: #f3f4f6; padding: 1px 5px; border-radius: 3px;
+  }
+
+  /* Amount fields — three columns */
+  .review-card .amounts { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .review-card .amounts .form-row input { font-variant-numeric: tabular-nums; }
+
+  /* Confirm / Reject actions */
+  .review-card .actions {
+    display: flex; gap: 10px;
+    padding-top: 16px; margin-top: 2px;
+  }
+  .review-card .btn-confirm {
+    flex: 1; background: #1e40af; color: #fff; border: none;
+    padding: 10px; border-radius: 6px;
+    font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s;
+  }
+  .review-card .btn-confirm:hover { background: #1d3a9e; }
+  .review-card .btn-reject {
+    background: transparent; color: #b91c1c; border: 1px solid #fecaca;
+    padding: 10px 16px; border-radius: 6px; font-size: 13px; cursor: pointer;
+    transition: background .15s;
+  }
+  .review-card .btn-reject:hover { background: #fef2f2; }
+  /* Requeue = devolver al inbox para reprocesar (ni confirmar ni descartar) — ámbar. */
+  .review-card .btn-requeue {
+    background: transparent; color: #b45309; border: 1px solid #fcd34d;
+    padding: 10px 16px; border-radius: 6px; font-size: 13px; cursor: pointer;
+    transition: background .15s;
+  }
+  .review-card .btn-requeue:hover { background: #fffbeb; }
+  .review-card .btn-confirm:disabled, .review-card .btn-reject:disabled,
+  .review-card .btn-requeue:disabled { opacity: 0.6; cursor: default; }
+
+  /* Keyboard-shortcut hint under the actions. */
+  .review-card .confirm-hint { margin-top: 8px; text-align: center; font-size: 11px; color: #9ca3af; }
+  .review-card .confirm-hint kbd {
+    font-family: inherit; font-size: 10.5px; color: #6b7280;
+    background: #f3f4f6; border: 1px solid #e5e7eb; border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 5px;
+  }
+
+  /* Picker of the other pending invoices, under the action buttons (no extra width used). */
+  .review-card .pending-picker { margin-top: 18px; padding-top: 16px; border-top: 1px solid #f3f4f6; }
+  .review-card .pending-picker-label {
+    display: block; font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .04em; color: #9ca3af; margin-bottom: 10px;
+  }
+  .review-card .pending-list { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+  .review-card .pending-pick {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
+    width: 100%; padding: 8px 10px; background: #fff; color: #111827;
+    border: 1px solid #e5e7eb; border-radius: 8px; cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .review-card .pending-pick:hover { border-color: #c7d2fe; background: #f9fafb; }
+  .review-card .pending-pick.active { border-color: #1e40af; background: #eff6ff; cursor: default; }
+  .review-card .pending-pick-name { font-size: 13px; font-weight: 500; }
+  .review-card .pending-pick-meta { font-size: 11px; color: #9ca3af; }
+
+  /* ── Manual entry ── */
+  .review-card .manual-entry-banner {
+    background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+    border-radius: 8px; padding: 12px 14px; font-size: 13px; font-weight: 500;
+    margin-bottom: 14px; line-height: 1.5;
+  }
+  .review-card .manual-tag {
+    display: inline-flex; align-items: center;
+    background: #fef3c7; color: #b45309;
+    padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 500;
+  }
+  .review-card .manual-entry-error {
+    color: #b91c1c; font-size: 12px; padding: 6px 0; margin-top: 4px;
+  }
+  /* ── OCR-sourced warning (deliberately alarming — OCR can misread) ── */
+  .review-card .ocr-banner {
+    background: #fff7ed; border: 1px solid #fb923c; color: #9a3412;
+    border-left: 4px solid #ea580c;
+    border-radius: 8px; padding: 12px 14px; font-size: 13px; font-weight: 500;
+    margin-bottom: 14px; line-height: 1.5;
+  }
+  .ocr-tag {
+    display: inline-flex; align-items: center;
+    background: #ea580c; color: #fff;
+    padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 700;
+    vertical-align: middle;
+  }
+  /* ── Credit-note (abono) warning — negative amounts, needs a human sanity check ── */
+  .review-card .abono-banner {
+    background: #faf5ff; border: 1px solid #c084fc; color: #6b21a8;
+    border-left: 4px solid #9333ea;
+    border-radius: 8px; padding: 12px 14px; font-size: 13px; font-weight: 500;
+    margin-bottom: 14px; line-height: 1.5;
+  }
+  .abono-tag {
+    display: inline-flex; align-items: center;
+    background: #9333ea; color: #fff;
+    padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 700;
+    vertical-align: middle;
+  }
+</style>
+
+<script>
+  import { confirmDialog } from '../scripts/confirmDialog';
+  import { renderLoadError } from '../scripts/loadError';
+
+  // Confidence keys match the field names the API returns (see PendingInvoice.BuildConfidence).
+  const LOW_CONF = 0.6;
+
+  // Ctrl+Enter confirms; on macOS the Cmd (⌘) key is the natural modifier, so label it accordingly.
+  // Both modifiers trigger the shortcut (see confirmShortcut), this only decides the visible hint.
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const confirmHintHtml =
+    `<div class="confirm-hint">${isMac ? '<kbd>⌘</kbd> <kbd>Enter</kbd>' : '<kbd>Ctrl</kbd> <kbd>Enter</kbd>'} para confirmar</div>`;
+
+  // Ctrl/Cmd+Enter confirms the invoice under review, from anywhere on the page (even while editing a
+  // field). requestSubmit runs the same submit handler and validation as clicking Confirmar. It no-ops
+  // when there is no form or the confirm button is disabled (already saving). Registered once below so
+  // it never accumulates across Astro navigations.
+  function confirmShortcut(e: KeyboardEvent): void {
+    if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+    const form = document.getElementById('review-form') as HTMLFormElement | null;
+    if (!form) return;
+    const btn = form.querySelector<HTMLButtonElement>('.btn-confirm');
+    if (!btn || btn.disabled) return;
+    e.preventDefault();
+    form.requestSubmit(btn);
+  }
+  document.addEventListener('keydown', confirmShortcut);
+
+  interface PendingListItem {
+    contentHash: string;
+    supplierName: string;
+    invoiceNumber: string;
+    totalAmount: number;
+    currency: string;
+    pendingCountForSupplier: number;
+    requiresManualEntry: boolean;
+    sourcedFromOcr: boolean;
+  }
+
+  interface CapturedField { value: string | null; confidence: number; }
+
+  interface PendingDetail {
+    contentHash: string;
+    originalFileName: string;
+    invoiceNumber: string;
+    supplierName: string;
+    supplierTaxId: string | null;
+    issueDate: string;
+    dueDate: string | null;
+    netAmount: number;
+    taxAmount: number;
+    totalAmount: number;
+    currency: string;
+    confidence: Record<string, CapturedField>;
+    trust: { unmodifiedCount: number; threshold: number };
+    requiresManualEntry: boolean;
+    sourcedFromOcr: boolean;
+  }
+
+  function log(msg: string, cls: 'ok' | 'err' | 'info'): void {
+    window.dispatchEvent(new CustomEvent('app:log', { detail: { msg, cls } }));
+  }
+
+  function esc(v: string | number | null): string {
+    return String(v ?? '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  }
+
+  // Returns '' when the value is empty or holds .NET's DateOnly.MinValue (0001-01-01),
+  // preventing the date input from showing a nonsensical minimum date.
+  function safeDate(v: string | null | undefined): string {
+    if (!v || v.startsWith('0001-')) return '';
+    return v;
+  }
+
+  function confClass(detail: PendingDetail, key: string): string {
+    const c = detail.confidence[key];
+    return c && c.confidence < LOW_CONF ? ' low-conf' : '';
+  }
+
+  function confHint(detail: PendingDetail, key: string): string {
+    const c = detail.confidence[key];
+    return c ? `<span class="conf">${Math.round(c.confidence * 100)}%</span>` : '';
+  }
+
+  // A field the template did not capture (e.g. IVA/total on IRPF or 3-field invoices) comes back with
+  // confidence 0. For optional fields we render it disabled + muted so it's clear it is not a real
+  // capture, while keeping its value (0 / base) so the net+tax=total coherence check still passes on confirm.
+  function notCaptured(detail: PendingDetail, key: string): boolean {
+    const c = detail.confidence[key];
+    return !c || c.confidence === 0;
+  }
+
+  function textRow(detail: PendingDetail, key: string, label: string, value: string | null, type = 'text', optional = false): string {
+    if (optional && notCaptured(detail, key)) {
+      return `
+        <div class="form-row not-captured">
+          <label>${label} <span class="conf-na">no capturado</span></label>
+          <input data-field="${key}" type="${type}" value="${esc(value)}" disabled />
+        </div>`;
+    }
+    return `
+      <div class="form-row${confClass(detail, key)}">
+        <label>${label} ${confHint(detail, key)}</label>
+        <input data-field="${key}" type="${type}" value="${esc(value)}" />
+      </div>`;
+  }
+
+  // A plain form-row without confidence decorations, used only in the manual-entry form.
+  function plainRow(label: string, field: string, type = 'text', placeholder = ''): string {
+    const ph = placeholder ? ` placeholder="${esc(placeholder)}"` : '';
+    const step = type === 'number' ? ' step="0.01" min="0"' : '';
+    return `
+      <div class="form-row">
+        <label>${label}</label>
+        <input data-field="${field}" type="${type}"${step}${ph} value="" />
+      </div>`;
+  }
+
+  function pickerHtml(queue: PendingListItem[], activeHash: string): string {
+    if (queue.length < 2) return '';
+    const rows = queue.map(q => {
+      const isActive = q.contentHash === activeHash;
+      const activeClass = isActive ? ' active' : '';
+      if (q.requiresManualEntry) {
+        const nameHtml = q.supplierName ? esc(q.supplierName) : 'PDF sin texto extraíble';
+        return `
+          <button type="button" class="pending-pick${activeClass}" data-hash="${esc(q.contentHash)}">
+            <span class="pending-pick-name">${nameHtml}</span>
+            <span class="pending-pick-meta"><span class="manual-tag">Alta manual</span></span>
+          </button>`;
+      }
+      return `
+        <button type="button" class="pending-pick${activeClass}" data-hash="${esc(q.contentHash)}">
+          <span class="pending-pick-name">${esc(q.supplierName)}${q.sourcedFromOcr ? ' <span class="ocr-tag">OCR</span>' : ''}${q.totalAmount < 0 ? ' <span class="abono-tag">ABONO</span>' : ''}</span>
+          <span class="pending-pick-meta">Nº ${esc(q.invoiceNumber)} · ${q.totalAmount.toFixed(2)} ${esc(q.currency)}</span>
+        </button>`;
+    }).join('');
+    return `
+      <div class="pending-picker">
+        <span class="pending-picker-label">Facturas pendientes</span>
+        <div class="pending-list">${rows}</div>
+      </div>`;
+  }
+
+  // Returns the review form markup only (no PDF pane). The persistent PDF pane is managed by
+  // ensureShell/updatePdf so the iframe is never torn down when moving between invoices.
+  function renderReviewForm(detail: PendingDetail, queue: PendingListItem[]): string {
+    const trusted = detail.trust.unmodifiedCount >= detail.trust.threshold;
+    return `
+        <form class="form-pane" id="review-form" data-hash="${detail.contentHash}" data-currency="${esc(detail.currency)}" data-supplier-name="${esc(detail.supplierName)}" data-supplier-tax-id="${esc(detail.supplierTaxId ?? '')}">
+          ${detail.sourcedFromOcr ? `<div class="ocr-banner">📷 Capturada por <strong>OCR</strong> (factura escaneada) — revisa los datos con atención, el OCR puede leer mal algún dígito.</div>` : ''}
+          ${detail.netAmount < 0 ? `<div class="abono-banner">🔁 <strong>Abono / rectificativa</strong> (importes en negativo) — verifica en el PDF que de verdad es un abono antes de confirmar.</div>` : ''}
+          <div class="supplier-header">
+            <div class="supplier-line">
+              <strong>${esc(detail.supplierName)}</strong>
+              ${detail.supplierTaxId ? `<span>${esc(detail.supplierTaxId)}</span>` : ''}
+            </div>
+            <span class="trust-badge${trusted ? ' trusted' : ''}" title="Al llegar a ${detail.trust.threshold} confirmaciones sin correcciones, las facturas de este proveedor se archivan automáticamente.">
+              Confianza: ${detail.trust.unmodifiedCount} de ${detail.trust.threshold} confirmaciones
+            </span>
+          </div>
+
+          <div class="form-group">
+            <span class="form-group-label">Documento</span>
+            ${textRow(detail, 'invoiceNumber', 'Nº factura', detail.invoiceNumber)}
+            <div class="form-dates">
+              ${textRow(detail, 'issueDate', 'Fecha emisión', safeDate(detail.issueDate), 'date')}
+              ${textRow(detail, 'dueDate', 'Fecha vencimiento', safeDate(detail.dueDate), 'date')}
+            </div>
+          </div>
+
+          <div class="form-group">
+            <span class="form-group-label">Importes</span>
+            <div class="amounts">
+              ${textRow(detail, 'netAmount', 'Base', String(detail.netAmount), 'number')}
+              ${textRow(detail, 'taxAmount', 'IVA', String(detail.taxAmount), 'number', true)}
+              ${textRow(detail, 'totalAmount', 'Total', String(detail.totalAmount), 'number', true)}
+            </div>
+          </div>
+
+          <div class="actions">
+            <button type="submit" class="btn-confirm">Confirmar</button>
+            <button type="button" class="btn-requeue">Reprocesar</button>
+            <button type="button" class="btn-reject">Rechazar</button>
+          </div>
+          ${confirmHintHtml}
+          ${pickerHtml(queue, detail.contentHash)}
+        </form>`;
+  }
+
+  // Returns the manual-entry form markup only (no PDF pane). See renderReviewForm.
+  function renderManualForm(detail: PendingDetail, queue: PendingListItem[]): string {
+    return `
+        <form class="form-pane" id="review-form"
+              data-hash="${esc(detail.contentHash)}"
+              data-currency="${esc(detail.currency)}"
+              data-manual-entry="true">
+          <div class="manual-entry-banner">
+            Alta manual — el extractor no pudo leer este PDF. Introduce los datos a mano.
+          </div>
+          <div class="supplier-header">
+            <div class="supplier-line">
+              <strong class="unidentified">Proveedor sin identificar</strong>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <span class="form-group-label">Proveedor</span>
+            <div class="form-row">
+              <label>Nombre</label>
+              <input data-field="supplierName" type="text"
+                     placeholder="Nombre del proveedor" autocomplete="off" value="" />
+            </div>
+            <div class="form-row">
+              <label>NIF/CIF</label>
+              <input data-field="supplierTaxId" type="text" placeholder="A12345678" value="" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <span class="form-group-label">Documento</span>
+            ${plainRow('Nº factura', 'invoiceNumber', 'text', 'FAC-2025-001')}
+            <div class="form-dates">
+              ${plainRow('Fecha emisión', 'issueDate', 'date')}
+              ${plainRow('Fecha vencimiento', 'dueDate', 'date')}
+            </div>
+          </div>
+
+          <div class="form-group">
+            <span class="form-group-label">Importes</span>
+            <div class="amounts">
+              ${plainRow('Base', 'netAmount', 'number', '0.00')}
+              ${plainRow('IVA', 'taxAmount', 'number', '0.00')}
+              ${plainRow('Total', 'totalAmount', 'number', '0.00')}
+            </div>
+          </div>
+
+          <div class="manual-entry-error" style="display:none;"></div>
+
+          <div class="actions">
+            <button type="submit" class="btn-confirm">Confirmar</button>
+            <button type="button" class="btn-requeue">Reprocesar</button>
+            <button type="button" class="btn-reject">Rechazar</button>
+          </div>
+          ${confirmHintHtml}
+          ${pickerHtml(queue, detail.contentHash)}
+        </form>`;
+  }
+
+  // Validates all fields in the manual-entry form. Returns an error string or null when valid.
+  function validateManualEntry(form: HTMLFormElement): string | null {
+    const supplierName = fieldValue(form, 'supplierName');
+    const supplierTaxId = fieldValue(form, 'supplierTaxId');
+    const invoiceNumber = fieldValue(form, 'invoiceNumber');
+    const issueDate = fieldValue(form, 'issueDate');
+    const dueDate = fieldValue(form, 'dueDate');
+    const netAmount = Number(fieldValue(form, 'netAmount') || '0');
+    const taxAmount = Number(fieldValue(form, 'taxAmount') || '0');
+    const totalAmount = Number(fieldValue(form, 'totalAmount') || '0');
+
+    if (!supplierName) return 'El nombre del proveedor es obligatorio.';
+    if (!supplierTaxId) return 'El NIF/CIF del proveedor es obligatorio.';
+    if (!invoiceNumber) return 'El número de factura es obligatorio.';
+    if (!issueDate) return 'La fecha de emisión es obligatoria.';
+
+    const yearStr = issueDate.split('-')[0] ?? '0';
+    if (parseInt(yearStr, 10) < 2000) return 'El año de la fecha de emisión debe ser 2000 o posterior.';
+
+    // Amounts may be negative on a rectificativa/abono (credit note): base, IVA and total all
+    // flip sign together, so we only reject a zero total and let the coherence check below enforce
+    // that the signs stay consistent (net + IVA = total).
+    if (totalAmount === 0) return 'El importe total no puede ser cero.';
+
+    if (Math.abs(netAmount + taxAmount - totalAmount) > 0.05) {
+      return `Los importes no son coherentes: ${netAmount.toFixed(2)} + ${taxAmount.toFixed(2)} ≠ ${totalAmount.toFixed(2)}.`;
+    }
+
+    if (dueDate && dueDate < issueDate) return 'La fecha de vencimiento no puede ser anterior a la de emisión.';
+
+    return null;
+  }
+
+  function fieldValue(form: HTMLFormElement, key: string): string {
+    const el = form.querySelector<HTMLInputElement>(`[data-field="${key}"]`);
+    return (el?.value ?? '').trim();
+  }
+
+  document.addEventListener('astro:page-load', () => {
+    const root = document.getElementById('review-root');
+    const queueCount = document.getElementById('queue-count');
+    if (!root) return;
+
+    // Kept across renders so the picker can switch invoices without refetching the queue.
+    let currentQueue: PendingListItem[] = [];
+
+    // Builds the persistent two-pane shell once (grid: PDF pane + form). The PDF pane and its iframe
+    // are never torn down when moving between invoices — only the form is swapped. Returns the .split.
+    function ensureShell(container: HTMLElement): HTMLElement {
+      let split = container.querySelector<HTMLElement>('.split');
+      if (!split) {
+        container.innerHTML = `
+          <div class="split">
+            <div class="pdf-pane">
+              <iframe title="PDF de la factura"></iframe>
+              <div class="pdf-loading">Cargando PDF…</div>
+              <a class="pdf-open" target="_blank" rel="noopener">Abrir en pestaña nueva ↗</a>
+            </div>
+          </div>`;
+        split = container.querySelector<HTMLElement>('.split')!;
+      }
+      return split;
+    }
+
+    // Points the persistent iframe at the given invoice's PDF, but only when it actually changes,
+    // so re-rendering the same invoice never reloads the PDF. Shows the overlay until the new one loads.
+    function updatePdf(split: HTMLElement, hash: string): void {
+      const iframe = split.querySelector<HTMLIFrameElement>('iframe');
+      const openLink = split.querySelector<HTMLAnchorElement>('.pdf-open');
+      const overlay = split.querySelector<HTMLElement>('.pdf-loading');
+      const src = `/api/pending/${hash}/pdf`;
+      if (openLink) openLink.href = src;
+      if (!iframe || iframe.getAttribute('src') === src) return;
+      if (overlay) {
+        overlay.hidden = false;
+        iframe.addEventListener('load', () => { overlay.hidden = true; }, { once: true });
+      }
+      iframe.src = src;
+    }
+
+    function showDetail(detail: PendingDetail): void {
+      if (!root) return;
+      // Build the markup first so the DOM swap below stays synchronous and the previous invoice
+      // stays on screen until the new one is ready.
+      const formHtml = detail.requiresManualEntry
+        ? renderManualForm(detail, currentQueue)
+        : renderReviewForm(detail, currentQueue);
+
+      const split = ensureShell(root);
+      updatePdf(split, detail.contentHash);
+      split.querySelector('.form-pane')?.remove();
+      split.insertAdjacentHTML('beforeend', formHtml);
+    }
+
+    async function loadQueue(): Promise<void> {
+      if (!root) return;
+      try {
+        const r = await fetch('/api/pending');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const queue = (await r.json()) as PendingListItem[];
+        if (!Array.isArray(queue)) throw new Error('Respuesta inesperada del servidor');
+        currentQueue = queue;
+
+        if (queueCount) queueCount.textContent = `${queue.length} pendiente(s)`;
+
+        if (queue.length === 0) {
+          root.innerHTML = '<p class="info">No hay facturas pendientes de revisión.</p>';
+          return;
+        }
+
+        const firstItem = queue[0];
+        if (!firstItem) return;
+        const d = await fetch(`/api/pending/${firstItem.contentHash}`);
+        if (!d.ok) throw new Error(`HTTP ${d.status}`);
+        showDetail((await d.json()) as PendingDetail);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (root) renderLoadError(root, `Error al cargar: ${msg}`, () => void loadQueue());
+      }
+    }
+
+    root.addEventListener('submit', async (e: SubmitEvent) => {
+      e.preventDefault();
+      const form = e.target as HTMLFormElement;
+      if (form.id !== 'review-form') return;
+      const hash = form.dataset.hash ?? '';
+      const isManual = form.dataset.manualEntry === 'true';
+
+      // Validate manual entries before touching the UI.
+      if (isManual) {
+        const validationError = validateManualEntry(form);
+        const errEl = form.querySelector<HTMLElement>('.manual-entry-error');
+        if (validationError) {
+          if (errEl) {
+            errEl.textContent = validationError;
+            errEl.style.display = 'block';
+          }
+          return;
+        }
+        if (errEl) errEl.style.display = 'none';
+      }
+
+      const btn = form.querySelector<HTMLButtonElement>('.btn-confirm');
+      if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+
+      const body = {
+        invoiceNumber: fieldValue(form, 'invoiceNumber'),
+        // In normal mode the supplier was resolved before review, so echo the dataset values.
+        // In manual-entry mode the human enters the supplier directly in the form inputs.
+        supplierName: isManual
+          ? fieldValue(form, 'supplierName')
+          : (form.dataset.supplierName ?? ''),
+        supplierTaxId: isManual
+          ? (fieldValue(form, 'supplierTaxId') || null)
+          : (form.dataset.supplierTaxId || null),
+        issueDate: fieldValue(form, 'issueDate'),
+        dueDate: fieldValue(form, 'dueDate') || null,
+        netAmount: Number(fieldValue(form, 'netAmount')),
+        taxAmount: Number(fieldValue(form, 'taxAmount')),
+        totalAmount: Number(fieldValue(form, 'totalAmount')),
+        // Currency is not editable in review; keep the extracted value (backend needs it for Money).
+        currency: form.dataset.currency ?? 'EUR',
+      };
+
+      try {
+        const r = await fetch(`/api/pending/${hash}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) {
+          const data = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+          throw new Error((data as { error?: string })?.error ?? `HTTP ${r.status}`);
+        }
+        const res = (await r.json()) as { wasModified: boolean; unmodifiedCount: number; isTrusted: boolean };
+        log(res.isTrusted
+          ? `Factura confirmada. El proveedor alcanzó ${res.unmodifiedCount} sin cambios y pasa a automático.`
+          : res.wasModified
+            ? 'Factura confirmada con correcciones (contador del proveedor reiniciado).'
+            : `Factura confirmada sin cambios (${res.unmodifiedCount} consecutivas).`, 'ok');
+        window.dispatchEvent(new CustomEvent('app:data-changed'));
+        await loadQueue();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log(`Error al confirmar: ${msg}`, 'err');
+        if (btn) { btn.disabled = false; btn.textContent = 'Confirmar'; }
+      }
+    });
+
+    root.addEventListener('click', async (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.classList.contains('btn-reject')) return;
+      const form = target.closest<HTMLFormElement>('#review-form');
+      const hash = form?.dataset.hash ?? '';
+      if (!hash) return;
+      if (!(await confirmDialog({
+        title: 'Rechazar factura',
+        message: 'El PDF se moverá a la carpeta de fallidas.',
+        confirmLabel: 'Rechazar',
+      }))) return;
+
+      const btn = target as HTMLButtonElement;
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        const r = await fetch(`/api/pending/${hash}`, { method: 'DELETE' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        log('Factura rechazada (movida a fallidas).', 'ok');
+        window.dispatchEvent(new CustomEvent('app:data-changed'));
+        await loadQueue();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log(`Error al rechazar: ${msg}`, 'err');
+        btn.disabled = false;
+        btn.textContent = 'Rechazar';
+      }
+    });
+
+    // Requeue: send the PDF back to the inbox so it is extracted again (e.g. after fixing its
+    // template). Unlike reject, it is not discarded — it goes round the pipeline once more.
+    root.addEventListener('click', async (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.classList.contains('btn-requeue')) return;
+      const form = target.closest<HTMLFormElement>('#review-form');
+      const hash = form?.dataset.hash ?? '';
+      if (!hash) return;
+      if (!(await confirmDialog({
+        title: 'Reprocesar factura',
+        message: 'Volverá a data/inbox/ y se procesará de nuevo (p. ej. tras crear su plantilla).',
+        confirmLabel: 'Reprocesar',
+        variant: 'primary',
+      }))) return;
+
+      const btn = target as HTMLButtonElement;
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        const r = await fetch(`/api/pending/${hash}/requeue`, { method: 'POST' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        log('Factura devuelta al inbox para reprocesar.', 'ok');
+        window.dispatchEvent(new CustomEvent('app:data-changed'));
+        await loadQueue();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log(`Error al reprocesar: ${msg}`, 'err');
+        btn.disabled = false;
+        btn.textContent = 'Reprocesar';
+      }
+    });
+
+    // Picker: load another pending invoice without touching the queue order.
+    root.addEventListener('click', async (e: MouseEvent) => {
+      const pick = (e.target as HTMLElement).closest<HTMLElement>('.pending-pick');
+      if (!pick || pick.classList.contains('active') || !root) return;
+      const hash = pick.dataset.hash ?? '';
+      if (!hash) return;
+      try {
+        const d = await fetch(`/api/pending/${hash}`);
+        if (!d.ok) throw new Error(`HTTP ${d.status}`);
+        showDetail((await d.json()) as PendingDetail);
+      } catch (err: unknown) {
+        log(`Error al cargar la factura: ${err instanceof Error ? err.message : String(err)}`, 'err');
+      }
+    });
+
+    void loadQueue();
+  });
+</script>

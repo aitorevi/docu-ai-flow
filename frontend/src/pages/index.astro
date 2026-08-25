@@ -1,0 +1,133 @@
+---
+import Base from '../layouts/Base.layout.astro';
+import StatusHeader from '../components/StatusHeader.astro';
+import EventLog from '../components/EventLog.astro';
+
+const currentYear = new Date().getFullYear();
+const years = [currentYear + 1, currentYear, currentYear - 1];
+const quarters = [1, 2, 3, 4];
+---
+<Base title="Panel — docu-ai-flow">
+  <div class="card">
+    <StatusHeader title="Procesador de facturas" />
+
+    <div class="section">
+      <p class="page-blurb">
+        Deja los PDF en <code>data/inbox/</code>. Las facturas de proveedores de confianza se
+        archivan solas; el resto esperan en <a href="/review">Revisar</a>.
+      </p>
+    </div>
+
+    <div class="section">
+      <h2>Exportar trimestre</h2>
+      <div class="row">
+        <div class="field">
+          <label for="export-year">Año</label>
+          <select id="export-year">
+            {years.map(y => <option value={y} selected={y === currentYear}>{y}</option>)}
+          </select>
+        </div>
+        <div class="field">
+          <label for="export-quarter">Trimestre</label>
+          <select id="export-quarter">
+            {quarters.map(q => <option value={q}>T{q}</option>)}
+          </select>
+        </div>
+        <button id="btn-export" class="btn">Generar Excel</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Enviar al asesor</h2>
+      <div class="row">
+        <div class="field">
+          <label for="send-year">Año</label>
+          <select id="send-year">
+            {years.map(y => <option value={y} selected={y === currentYear}>{y}</option>)}
+          </select>
+        </div>
+        <div class="field">
+          <label for="send-quarter">Trimestre</label>
+          <select id="send-quarter">
+            {quarters.map(q => <option value={q}>T{q}</option>)}
+          </select>
+        </div>
+        <button id="btn-send" class="btn btn-secondary">Enviar ZIP</button>
+      </div>
+      <p class="hint">Requiere una clave de Resend configurada en <code>.env</code>.</p>
+    </div>
+
+    <EventLog />
+  </div>
+</Base>
+
+<style>
+  .page-blurb code {
+    background: #f3f4f6;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .hint { margin-top: 10px; font-size: 12px; color: #9ca3af; }
+  .hint code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; }
+</style>
+
+<script>
+  function log(msg: string, cls: 'ok' | 'err' | 'info'): void {
+    window.dispatchEvent(new CustomEvent('app:log', { detail: { msg, cls } }));
+  }
+
+  function selected(id: string): string {
+    return (document.getElementById(id) as HTMLSelectElement | null)?.value ?? '';
+  }
+
+  async function post(url: string, button: HTMLButtonElement, busyLabel: string): Promise<unknown> {
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = busyLabel;
+    try {
+      const r = await fetch(url, { method: 'POST' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return await r.json();
+    } finally {
+      button.disabled = false;
+      button.textContent = original;
+    }
+  }
+
+  document.addEventListener('astro:page-load', () => {
+    const exportBtn = document.getElementById('btn-export') as HTMLButtonElement | null;
+    const sendBtn = document.getElementById('btn-send') as HTMLButtonElement | null;
+
+    exportBtn?.addEventListener('click', async () => {
+      const year = selected('export-year');
+      const quarter = selected('export-quarter');
+      try {
+        const res = (await post(`/api/export/${year}/${quarter}`, exportBtn, 'Generando...')) as
+          { nothingNew: boolean; exported: number; filePath: string };
+        log(res.nothingNew
+          ? `Nada nuevo que exportar para ${year} T${quarter}.`
+          : `${res.exported} factura(s) exportadas → ${res.filePath}`, res.nothingNew ? 'info' : 'ok');
+        window.dispatchEvent(new CustomEvent('app:data-changed'));
+      } catch (err: unknown) {
+        log(`Error al exportar: ${err instanceof Error ? err.message : String(err)}`, 'err');
+      }
+    });
+
+    sendBtn?.addEventListener('click', async () => {
+      const year = selected('send-year');
+      const quarter = selected('send-quarter');
+      try {
+        const res = (await post(`/api/send/${year}/${quarter}`, sendBtn, 'Enviando...')) as
+          { nothingNew: boolean; sent: number; parts: number; quarter: string };
+        log(res.nothingNew
+          ? `Nada nuevo que enviar para ${res.quarter}.`
+          : `${res.sent} factura(s) enviadas al asesor (${res.parts} envío(s)).`,
+          res.nothingNew ? 'info' : 'ok');
+        window.dispatchEvent(new CustomEvent('app:data-changed'));
+      } catch (err: unknown) {
+        log(`Error al enviar: ${err instanceof Error ? err.message : String(err)}`, 'err');
+      }
+    });
+  });
+</script>
