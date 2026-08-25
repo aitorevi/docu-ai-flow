@@ -117,6 +117,22 @@ public sealed class SqliteProcessedInvoiceRepository(IOptions<DatabaseOptions> o
         }
     }
 
+    public async Task<bool> ExistsByNaturalKeyAsync(string invoiceNumber, string supplierTaxId, CancellationToken ct)
+    {
+        await using var conn = Open();
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT EXISTS(
+                SELECT 1 FROM invoices
+                WHERE invoice_number = @number AND supplier_tax_id = @taxId
+            );
+            """;
+        cmd.Parameters.AddWithValue("@number", invoiceNumber);
+        cmd.Parameters.AddWithValue("@taxId", supplierTaxId);
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct)) == 1;
+    }
+
     private SqliteConnection Open() => new($"Data Source={_path}");
 
     private static StoredInvoice Map(SqliteDataReader r) => new(

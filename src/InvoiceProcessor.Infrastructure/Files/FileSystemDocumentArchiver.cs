@@ -12,12 +12,65 @@ public sealed class FileSystemDocumentArchiver(IOptions<FolderOptions> folders) 
 {
     private readonly string _archive = Path.GetFullPath(folders.Value.Archive);
     private readonly string _failed  = Path.GetFullPath(folders.Value.Failed);
+    private readonly string _pending = Path.GetFullPath(folders.Value.Pending);
+    private readonly string _duplicates = Path.GetFullPath(folders.Value.Duplicates);
+    private readonly string _inbox   = Path.GetFullPath(folders.Value.Inbox);
 
-    // Procesado → {Archive}/2026/01/Repsol/Repsol-F2026-0042.pdf (año y mes = fecha de EMISIÓN)
-    public Task<string> ArchiveProcessedAsync(IncomingDocument doc, Invoice invoice, CancellationToken ct)
+    // Procesado → {Archive}/2026/01/proveedor/proveedor-f2026-0042.pdf (año y mes = fecha de EMISIÓN)
+    public Task<string> ArchiveProcessedAsync(IncomingDocument doc, Invoice invoice, CancellationToken ct) =>
+        Task.FromResult(MoveResolvingCollision(
+            doc.Location, BuildArchiveTarget(invoice, Path.GetExtension(doc.FileName))));
+
+    // Duplicado → {Duplicates}/20260113-101500-factura.pdf. Se saca del inbox para que el
+    // watcher deje de reprocesarlo, y el prefijo de fecha deja rastro de cuándo llegó.
+    public Task<string> ArchiveDuplicateAsync(IncomingDocument doc, CancellationToken ct)
+    {
+        Directory.CreateDirectory(_duplicates);
+        var target = Path.Combine(_duplicates, $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-{doc.FileName}");
+        return Task.FromResult(MoveResolvingCollision(doc.Location, target));
+    }
+
+    // Pendiente de revisión → {Pending}/proveedor-factura.pdf. El PDF se retiene aquí, sin
+    // archivar, hasta que un humano lo confirme.
+    public Task<string> ArchivePendingAsync(IncomingDocument doc, string supplierName, CancellationToken ct)
+    {
+        Directory.CreateDirectory(_pending);
+        var prefix = string.IsNullOrWhiteSpace(supplierName)
+            ? string.Empty : CanonicalizeSupplierName(supplierName) + "-";
+        var target = Path.Combine(_pending, $"{prefix}{doc.FileName}");
+        return Task.FromResult(MoveResolvingCollision(doc.Location, target));
+    }
+
+    // Confirmada → mueve el PDF retenido en pending/ a su ruta definitiva de archive/.
+    public Task<string> ArchiveConfirmedAsync(string pendingPath, Invoice invoice, CancellationToken ct) =>
+        Task.FromResult(MoveResolvingCollision(
+            pendingPath, BuildArchiveTarget(invoice, Path.GetExtension(pendingPath))));
+
+    // Rechazada → pending/ a failed/. false si el PDF ya no está en disco.
+    public Task<bool> RejectPendingAsync(string pendingPath, CancellationToken ct)
+    {
+        if (!File.Exists(pendingPath)) return Task.FromResult(false);
+        Directory.CreateDirectory(_failed);
+        var target = Path.Combine(_failed, $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Path.GetFileName(pendingPath)}");
+        MoveResolvingCollision(pendingPath, target);
+        return Task.FromResult(true);
+    }
+
+    // Reprocesar → pending/ a inbox/, p. ej. tras escribir su plantilla. Vuelve con su NOMBRE
+    // ORIGINAL, no con el de pending/ (que lleva el prefijo del proveedor): de lo contrario cada
+    // vuelta acumularía otro prefijo — proveedor-proveedor-proveedor-factura.pdf.
+    public Task<bool> RequeuePendingAsync(string pendingPath, string originalFileName, CancellationToken ct)
+    {
+        if (!File.Exists(pendingPath)) return Task.FromResult(false);
+        Directory.CreateDirectory(_inbox);
+        MoveResolvingCollision(pendingPath, Path.Combine(_inbox, originalFileName));
+        return Task.FromResult(true);
+    }
+
+    // Ruta definitiva {Archive}/{año}/{mes}/{proveedor}/{proveedor}-{numero}{ext}.
+    private string BuildArchiveTarget(Invoice invoice, string extension)
     {
         var supplier = CanonicalizeSupplierName(invoice.Supplier.Name);
-
         var dir = Path.Combine(
             _archive,
             invoice.IssueDate.Year.ToString("D4"),
@@ -26,10 +79,7 @@ public sealed class FileSystemDocumentArchiver(IOptions<FolderOptions> folders) 
         Directory.CreateDirectory(dir);
 
         var number = Sanitize(invoice.InvoiceNumber, fallback: "sin-numero").ToLowerInvariant();
-        var ext = Path.GetExtension(doc.FileName);
-        var fileName = $"{supplier}-{number}{ext}";
-
-        return Task.FromResult(MoveResolvingCollision(doc.Location, Path.Combine(dir, fileName)));
+        return Path.Combine(dir, $"{supplier}-{number}{extension.ToLowerInvariant()}");
     }
 
     // Fallo → {Failed}/20260113-101500-factura.pdf (prefijo de fecha para no colisionar)

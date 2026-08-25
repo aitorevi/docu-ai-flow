@@ -41,6 +41,8 @@ public static class DependencyInjection
             o.Inbox   = Path.GetFullPath(o.Inbox, dataRoot);
             o.Archive = Path.GetFullPath(o.Archive, dataRoot);
             o.Failed  = Path.GetFullPath(o.Failed, dataRoot);
+            o.Pending = Path.GetFullPath(o.Pending, dataRoot);
+            o.Duplicates = Path.GetFullPath(o.Duplicates, dataRoot);
             o.Output  = Path.GetFullPath(o.Output, dataRoot);
         });
         services.PostConfigure<DatabaseOptions>(o => o.Path = Path.GetFullPath(o.Path, dataRoot));
@@ -66,6 +68,22 @@ public static class DependencyInjection
         services.AddSingleton<IProcessedInvoiceRepository>(sp =>
         {
             var repo = sp.GetRequiredService<SqliteProcessedInvoiceRepository>();
+            repo.EnsureCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
+            return repo;
+        });
+
+        services.AddSingleton<SqlitePendingInvoiceRepository>();
+        services.AddSingleton<IPendingInvoiceRepository>(sp =>
+        {
+            var repo = sp.GetRequiredService<SqlitePendingInvoiceRepository>();
+            repo.EnsureCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
+            return repo;
+        });
+
+        services.AddSingleton<SqliteSupplierTrustRepository>();
+        services.AddSingleton<ISupplierTrustRepository>(sp =>
+        {
+            var repo = sp.GetRequiredService<SqliteSupplierTrustRepository>();
             repo.EnsureCreatedAsync(CancellationToken.None).GetAwaiter().GetResult();
             return repo;
         });

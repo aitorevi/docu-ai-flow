@@ -34,6 +34,42 @@ public sealed class JsonFileProcessedDocumentLog : IProcessedDocumentLog
         finally { _lock.Release(); }
     }
 
+    // Forgets a hash so the same PDF can be submitted again — used when a pending invoice is
+    // rejected or requeued. The log is append-only in the happy path, so removing means
+    // rewriting the file without that entry.
+    public async Task RemoveAsync(string contentHash, CancellationToken ct)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            if (!_hashes.Remove(contentHash)) return; // not present, nothing to rewrite
+            await RewriteToDiskAsync(ct);
+        }
+        finally { _lock.Release(); }
+    }
+
+    private async Task RewriteToDiskAsync(CancellationToken ct)
+    {
+        if (_hashes.Count == 0)
+        {
+            if (File.Exists(_filePath)) File.Delete(_filePath);
+            return;
+        }
+
+        var kept = (File.Exists(_filePath) ? await File.ReadAllLinesAsync(_filePath, ct) : [])
+            .Where(line =>
+            {
+                if (string.IsNullOrWhiteSpace(line)) return false;
+                try { return JsonSerializer.Deserialize<LogEntry>(line)?.Hash is { } h && _hashes.Contains(h); }
+                catch (JsonException) { return false; }
+            });
+
+        // Write-then-move so a crash mid-rewrite cannot leave a truncated log behind.
+        var tmp = _filePath + ".tmp";
+        await File.WriteAllLinesAsync(tmp, kept, ct);
+        File.Move(tmp, _filePath, overwrite: true);
+    }
+
     private static HashSet<string> LoadFromDisk(string filePath)
     {
         if (!File.Exists(filePath)) return [];
