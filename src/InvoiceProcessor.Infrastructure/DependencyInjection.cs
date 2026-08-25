@@ -28,6 +28,23 @@ public static class DependencyInjection
         services.Configure<DatabaseOptions>(configuration.GetSection("Database"));
         services.Configure<ResendOptions>(configuration.GetSection("Resend"));
 
+        // Pin every relative data path to one root, so "./data/inbox" is the same folder whether
+        // the app was started with `dotnet run`, from the published binary, or inside a container.
+        var dataRoot = DataRoot.Resolve(
+            Environment.GetEnvironmentVariable(DataRoot.EnvVariable)
+                ?? configuration.GetValue<string>("Folders:Root"),
+            AppContext.BaseDirectory);
+
+        services.PostConfigure<FolderOptions>(o =>
+        {
+            o.Root    = dataRoot;
+            o.Inbox   = Path.GetFullPath(o.Inbox, dataRoot);
+            o.Archive = Path.GetFullPath(o.Archive, dataRoot);
+            o.Failed  = Path.GetFullPath(o.Failed, dataRoot);
+            o.Output  = Path.GetFullPath(o.Output, dataRoot);
+        });
+        services.PostConfigure<DatabaseOptions>(o => o.Path = Path.GetFullPath(o.Path, dataRoot));
+
         services.AddSingleton<IInvoiceTemplateRepository, AppsettingsTemplateRepository>();
 
         services.AddSingleton<IDocumentReader, FileSystemDocumentReader>();
