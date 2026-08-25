@@ -10,6 +10,7 @@ using InvoiceProcessor.Infrastructure.Extraction.Ocr;
 using InvoiceProcessor.Infrastructure.Extraction.Templates;
 using InvoiceProcessor.Infrastructure.Mail;
 using InvoiceProcessor.Worker;
+using Microsoft.Extensions.Options;
 using System.Diagnostics;
 
 LoadDotEnv();
@@ -53,6 +54,32 @@ builder.Services.AddHostedService<FolderWatcherService>();
 var app = builder.Build();
 
 app.Logger.LogInformation("Extractor activo: {Provider}", activeProvider);
+
+// CLI mode "make-samples": dotnet run -- make-samples [outputDir]
+if (args is ["make-samples", ..])
+{
+    Environment.ExitCode = await SampleInvoices.GenerateAsync(
+        args.Length > 1 ? args[1] : "./data/samples");
+    return;
+}
+
+// CLI mode "dump-text": dotnet run -- dump-text <pdf>
+if (args is ["dump-text", var dumpPdf])
+{
+    Environment.ExitCode = await TemplateDiagnostics.DumpTextAsync(dumpPdf);
+    return;
+}
+
+// CLI mode "template-check": dotnet run -- template-check <pdf-or-folder>
+if (args is ["template-check", var checkTarget])
+{
+    using var checkScope = app.Services.CreateScope();
+    Environment.ExitCode = await TemplateDiagnostics.CheckAsync(
+        checkTarget,
+        checkScope.ServiceProvider.GetRequiredService<IOptions<TemplateExtractorOptions>>().Value,
+        checkScope.ServiceProvider.GetRequiredService<IInvoiceTemplateRepository>());
+    return;
+}
 
 // CLI mode "master": dotnet run -- master  →  regenerates maestro_facturas.xlsx
 if (args is ["master"])
