@@ -1,19 +1,49 @@
 # docu-ai-flow
 
-Folder-watching .NET 10 service that extracts invoice data from PDFs via AI, exports to Excel, and emails quarterly archives to your advisor.
+Folder-watching .NET 10 service that extracts invoice data from PDFs, exports to Excel, and emails quarterly archives to your advisor.
 
-Drop a PDF into `./data/inbox/`. The service detects it, extracts the invoice fields via [Google Document AI](https://cloud.google.com/document-ai), persists the data in SQLite, archives the original PDF, and regenerates a master Excel spreadsheet. When a quarter closes, one command ZIPs the PDFs and emails them to your tax advisor via [Resend](https://resend.com).
+Drop a PDF into `./data/inbox/`. The service detects it, extracts the invoice fields, persists the data in SQLite, archives the original PDF, and regenerates a master Excel spreadsheet. When a quarter closes, one command ZIPs the PDFs and emails them to your tax advisor via [Resend](https://resend.com).
 
 Built with **.NET 10**, **C#**, and a strict **hexagonal architecture**. Business errors use the **Result pattern** (`SharpMonads.Core`); infrastructure failures bubble up to Polly.
 
+**It runs with no accounts and no API keys.** Clone it, drop the sample invoices in `data/samples/` into the inbox, and watch the whole pipeline work — extraction included.
+
 ### Pluggable extraction
 
-Extraction sits behind a single port, `IInvoiceDataExtractor`, so the AI provider is a swappable detail chosen in the composition root. Two adapters ship in the box:
+Extraction sits behind a single port, `IInvoiceDataExtractor`. Two adapters are live, and which one is bound is a **configuration** value (`Extraction:Provider`), not a code change:
 
-- **Google Document AI** (`GoogleDocumentAiExtractor`) — the active extractor. Its Invoice Parser returns typed fields that survive arbitrary supplier layouts.
-- **LlamaParse** (`LlamaParseExtractor`) — kept as a reference implementation. It is still registered as a type but no longer bound to the port; in our tests its field accuracy fell short, so it is preserved as a proof-of-result, not the default.
+- **Local templates** (`TemplateInvoiceExtractor`) — **the default**. Reads the PDF's text layer with [PdfPig](https://github.com/UglyToad/PdfPig), identifies the supplier from anchor strings, and pulls each field with an anchor + regex defined in `appsettings.json`. No network, no credentials, **0 € per invoice**.
+- **Google Document AI** (`GoogleDocumentAiExtractor`) — the cloud Invoice Parser. Generalises to layouts nobody has ever taught it, at roughly $0.10 per page and a service-account key.
 
-Swapping providers is a one-line change in `Program.cs`. No test, use case, or domain type depends on the concrete adapter.
+This project started on LlamaParse, moved to Google Document AI when its field accuracy fell short, and ended up on a local template extractor that beat both on the invoices it actually sees. Across all three swaps, **the domain, the use cases and the pipeline tests never changed** — they depend on the port, not on the provider. That is the whole return on the hexagon, and it is why the default is now the free one.
+
+The trade-off is honest: templates only know the suppliers they have been taught. When no template matches, the extractor says so (`RequiresManualEntry`) instead of inventing an invoice.
+
+#### OCR fallback
+
+Scans have no text layer, so there is nothing for PdfPig to read. When `TemplateExtractor:OcrFallback:Enabled` is on, `TesseractOcrExtractor` rasterises the first page with poppler and reads it with Tesseract; the recovered text then goes through the same template pipeline. When it is off, a `NullOcrTextExtractor` returns an empty string, so no branch in the extractor has to know whether OCR exists. Any OCR failure — tools missing, timeout, corrupt PDF — degrades to manual entry rather than to an exception.
+
+#### Writing a template
+
+Three commands, no Worker required:
+
+```bash
+dotnet run --project src/InvoiceProcessor.Worker -- dump-text invoice.pdf
+dotnet run --project src/InvoiceProcessor.Worker -- template-check ./data/samples
+dotnet run --project src/InvoiceProcessor.Worker -- make-samples          # regenerate the demo PDFs
+```
+
+`template-check` reports one line per PDF and a success ratio:
+
+```
+[OK]     aurora-A-2026-0148.pdf — Suministros Aurora S.L.
+[NONE]   desconocido-TD-2026-77.pdf — no template matched
+[SCAN]   escaneo-sin-texto.pdf — no text layer (0 chars)
+
+Result: 3/5 coherent (60%)  ·  0 incoherent [BAD]
+```
+
+It does not stop at "every required field was captured" — it cross-checks `net + tax = total`, so `[OK]` means the numbers are sane rather than merely present. A greedy pattern that grabs a phone number as the tax amount shows up as `[BAD]`.
 
 ## Stack
 
@@ -24,16 +54,21 @@ Swapping providers is a one-line change in `Program.cs`. No test, use case, or d
 | Error handling | `Result<TValue, TError>` via SharpMonads.Core |
 | Persistence | SQLite (`Microsoft.Data.Sqlite`) |
 | Excel output | ClosedXML |
-| AI extraction | Google Document AI (Invoice Parser); LlamaParse REST API kept as reference |
+| Extraction | Local templates over PdfPig (default); Google Document AI (Invoice Parser) |
+| OCR fallback | poppler (`pdftoppm`) + Tesseract, optional |
 | Email | Resend REST API |
 | Resilience | Polly (`AddStandardResilienceHandler`) |
-| Tests | xUnit + NSubstitute + WireMock.Net |
+| Tests | xUnit + NSubstitute + WireMock.Net + NetArchTest |
 
 ## Requirements
 
+Only the first one is mandatory. Everything else buys an optional capability.
+
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- A [Google Cloud](https://cloud.google.com/document-ai) project with a Document AI **Invoice Parser** processor and a service-account JSON key (for invoice extraction). A [LlamaParse](https://llamaindex.ai) API key is only needed if you switch back to the reference adapter.
-- A [Resend](https://resend.com) account and verified domain (for email dispatch)
+- **Only** for `Extraction:Provider=DocumentAi`: a [Google Cloud](https://cloud.google.com/document-ai) project with a Document AI **Invoice Parser** processor and a service-account JSON key. The default local extractor needs neither.
+- **Only** for the OCR fallback on scanned invoices: `poppler` and `tesseract`.
+  macOS `brew install poppler tesseract tesseract-lang` · Debian/Ubuntu `apt-get install poppler-utils tesseract-ocr tesseract-ocr-spa`
+- **Only** for email dispatch: a [Resend](https://resend.com) account and a verified domain
 - [Claude Code](https://claude.ai/code) (optional, for AI-assisted development)
 - [gh](https://cli.github.com) (optional, for PR management)
 
@@ -87,17 +122,37 @@ Stop with **Ctrl+C**. If the port is already in use (e.g. a previous run crashed
 lsof -ti :5000 | xargs kill -9
 ```
 
+### Try it with no configuration at all
+
+```bash
+cp data/samples/*.pdf data/inbox/
+```
+
+Five fictional invoices, chosen to walk every interesting path:
+
+| File | What it exercises |
+|---|---|
+| `aurora-A-2026-0148.pdf` | `label: value` layout, Spanish numbers and dates → archived |
+| `boreal-FR-2026-0092.pdf` | column table, values on the line after the header → archived |
+| `cronos-C-26-0311.pdf` | dot leaders, US numbers, English month → archived |
+| `desconocido-TD-2026-77.pdf` | no template for this supplier → manual entry, not a guess |
+| `escaneo-sin-texto.pdf` | no text layer → OCR fallback, or manual entry when OCR is off |
+
+Regenerate them any time with `dotnet run --project src/InvoiceProcessor.Worker -- make-samples`.
+
+### The pipeline
+
 Drop PDF invoices into `./data/inbox/`. The watcher will:
 1. Detect the file (real-time watcher + polling fallback)
 2. Wait until the file is fully written
 3. Check for duplicates via SHA-256 hash
-4. Extract invoice fields via Google Document AI
+4. Extract invoice fields with the active extractor (local templates by default)
 5. Normalize the supplier against the catalog in `appsettings.json`
 6. Persist the invoice in SQLite (`./data/invoices.db`)
 7. Archive the PDF to `./data/archive/{year}/{month}/{supplier}/`
 8. Regenerate `./data/output/maestro_facturas.xlsx`
 
-Failed invoices (extraction errors, incoherent totals) are moved to `./data/failed/`.
+Invoices the extractor could not understand — no text layer, no matching template, a mandatory field it could not parse — are moved to `./data/failed/` for manual entry. So are extractions whose totals do not add up.
 
 From the dashboard you can:
 - **Export Excel** — generate the quarterly spreadsheet ready for your accounting app
@@ -140,8 +195,9 @@ src/
 │   ├── Dispatch/                     # SendQuarterToAdvisorService
 │   └── Export/                       # ExportQuarterToSpreadsheetService
 ├── InvoiceProcessor.Infrastructure/  # Concrete adapters
-│   ├── Extraction/DocumentAi/        # GoogleDocumentAiExtractor, GoogleDocumentAiMapper, GoogleDocumentAiOptions (active)
-│   ├── Extraction/LlamaParse/        # LlamaParseExtractor, LlamaParseMapper (reference / proof-of-result)
+│   ├── Extraction/Templates/         # TemplateInvoiceExtractor, TemplateFieldParser, AppsettingsTemplateRepository (default)
+│   ├── Extraction/DocumentAi/        # GoogleDocumentAiExtractor, GoogleDocumentAiMapper, GoogleDocumentAiOptions
+│   ├── Extraction/Ocr/               # TesseractOcrExtractor, NullOcrTextExtractor (fallback for scans)
 │   ├── Extraction/                   # SupplierNameHeuristics (shared)
 │   ├── Files/                        # FileSystemDocumentReader, FileSystemDocumentArchiver, FileSystemArchivedInvoiceSource, FileStabilityWaiter
 │   ├── Suppliers/                    # CatalogSupplierNormalizer, CompanyOptions
@@ -159,7 +215,7 @@ tests/
 ├── InvoiceProcessor.Application.Tests/    # Use cases with NSubstitute port doubles
 └── InvoiceProcessor.Integration.Tests/    # Archiver, SQLite repos, Excel writers, zip, watcher stress, mapper golden-master
     ├── Fixtures/                           # MinimalPdf, FakeInvoiceDataExtractor, RealInvoices/gcp/*.json (anonymized)
-    ├── Extraction/                         # GoogleDocumentAiMapper golden-master, LlamaParse contract, Google live (skipped)
+    ├── Extraction/                         # template extractor + parser, shipped demo templates, Document AI mapper golden-master
     └── Pipeline/                           # End-to-end pipeline tests (PipelineFixture, Processing, Export, Send)
 data/
 ├── inbox/      # Drop PDFs here
@@ -173,18 +229,23 @@ data/
 The recommended way to configure the app is via a `.env` file in the repo root (gitignored). Copy `.env.example` to get started:
 
 ```
-# Google Document AI (active extractor). Credentials are loaded from the
+# Extraction backend: Template (default, local, free) or DocumentAi (Google, paid).
+# Leave it unset and you get Template.
+Extraction__Provider=Template
+
+# Only for Extraction__Provider=DocumentAi. Credentials are loaded from the
 # service-account JSON pointed to by GOOGLE_APPLICATION_CREDENTIALS (ADC).
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 GoogleDocumentAi__ProjectId=your-gcp-project-id
 GoogleDocumentAi__Location=eu
 GoogleDocumentAi__ProcessorId=your-processor-id
+
+# Only for scanned invoices; requires poppler + tesseract on the machine.
+TemplateExtractor__OcrFallback__Enabled=false
+
 # Your own company identity — used to filter the buyer out of the extracted supplier fields.
 Company__TaxId=
 Company__Name=
-
-# Only needed if you switch back to the LlamaParse reference adapter.
-LlamaParse__ApiKey=llx-your-key-here
 
 Resend__ApiKey=re_your-key-here
 Resend__FromAddress=invoices@yourdomain.com
@@ -217,16 +278,29 @@ All non-secret settings live in `src/InvoiceProcessor.Worker/appsettings.json`:
     "Name": ""
   },
   "Extraction": {
+    "Provider": "Template",
     "ConfidenceThreshold": 0.6
   },
-  "LlamaParse": {
-    "ParseEndpoint": "https://api.cloud.llamaindex.ai/api/v1/parsing/upload",
-    "ApiKey": ""
+  "TemplateExtractor": {
+    "MinTextLength": 50,
+    "OcrFallback": { "Enabled": false, "Language": "spa", "TimeoutSeconds": 60 },
+    "Templates": [
+      {
+        "SupplierId": "aurora",
+        "SupplierName": "Suministros Aurora S.L.",
+        "SupplierTaxId": "B12345674",
+        "IdentificationAnchors": ["SUMINISTROS AURORA", "B12345674"],
+        "Fields": {
+          "invoice_number": { "Anchors": ["Factura Nº"], "Pattern": ":\\s*(\\S+)" },
+          "issue_date":     { "Anchors": ["Fecha"], "Pattern": ":\\s*([\\d/]+)" },
+          "net_amount":     { "Anchors": ["Base imponible"], "Pattern": ":\\s*([\\d.,]+)" }
+        }
+      }
+    ]
   },
   "SupplierCatalog": {
     "Suppliers": [
-      { "CanonicalName": "Repsol", "TaxId": "A78374725", "Aliases": ["REPSOL S.A.", "Repsol Comercializadora"] },
-      { "CanonicalName": "Endesa", "TaxId": "A81948077", "Aliases": ["Endesa Energía", "ENDESA ENERGIA S.A.U."] }
+      { "CanonicalName": "Suministros Aurora", "TaxId": "B12345674", "Aliases": ["SUMINISTROS AURORA S.L."] }
     ]
   },
   "Resend": {
@@ -248,34 +322,40 @@ All non-secret settings live in `src/InvoiceProcessor.Worker/appsettings.json`:
 
 | Key | Description |
 |-----|-------------|
+| `Extraction:Provider` | `Template` (default, local, free) or `DocumentAi` (Google, paid). An unrecognised value falls back to `Template` |
+| `TemplateExtractor:Templates` | Per-supplier anchors and regexes. `IdentificationAnchors` pick the supplier; each field has its own `Anchors` + `Pattern` whose first capture group is the value |
+| `TemplateExtractor:MinTextLength` | Below this many characters the PDF is treated as a scan |
+| `TemplateExtractor:OcrFallback:Enabled` | Rasterise scans with poppler and read them with Tesseract. Off by default |
 | `GoogleDocumentAi:Location` | Document AI region; must match the processor's location (e.g. `eu`, `us`) |
 | `GoogleDocumentAi:ProcessorId` | The Invoice Parser processor id from the Google Cloud console |
 | `Company:TaxId` / `Company:Name` | Your own identity — filtered out of the extracted supplier fields |
 | `Resend:FromAddress` | Must belong to a domain verified in Resend (DKIM/SPF) |
 | `Resend:CcAddress` | Optional. When set, a copy of every advisor email is sent here |
-| `Extraction:ConfidenceThreshold` | PDFs with lower average confidence are moved to `failed/` |
+| `Extraction:ConfidenceThreshold` | Extractions with lower average confidence are moved to `failed/` |
 | `MailDispatch:MaxAttachmentMb` | ZIP size limit before splitting by month (default 38 MB — Resend's hard limit is 40 MB) |
 
 ## Running tests
 
 ```bash
-dotnet test                                  # all 111 tests
-dotnet test --filter "Category!=LiveGcp"     # everything except the live Google smoke test (CI default)
+dotnet test                                  # all 202 tests
+dotnet test --filter "Category!=LiveGcp&Category!=RequiresTesseract"   # CI default
 dotnet test --filter "Domain"                # domain unit tests only
 dotnet test --filter "Application"           # use-case unit tests only
 dotnet test --filter "Integration"           # integration tests (SQLite, Excel, zip, watcher, pipeline, mappers)
 dotnet test --filter "Pipeline"              # end-to-end pipeline tests only
 ```
 
-One integration test (`GoogleDocumentAiExtractorLiveTests`, tagged `[Trait("Category","LiveGcp")]`) calls the real Google Document AI API. It self-skips unless `GOOGLE_APPLICATION_CREDENTIALS` and the processor env vars are present, so it never runs in CI.
+Two tests are excluded from CI. `GoogleDocumentAiExtractorLiveTests` (`Category=LiveGcp`) calls the real Google API and self-skips unless the credentials and processor env vars are present. `TesseractOcrExtractorIntegrationTests` (`Category=RequiresTesseract`) shells out to the real poppler + tesseract binaries.
+
+`ShippedDemoTemplatesTests` runs the demo templates from the Worker's own `appsettings.json` against generated PDFs, so a broken anchor or pattern fails the build rather than someone's first run.
 
 ### Test layers
 
 | Layer | Count | What they cover |
 |---|---|---|
 | Domain | 23 | `Money`, `Invoice`, `Quarter` — pure business rules, no dependencies |
-| Application | 24 | Use cases with NSubstitute port doubles — business logic in isolation |
-| Integration | 64 | Real SQLite, ClosedXML, filesystem, zip; extraction mappers; WireMock stub for Resend |
+| Application | 25 | Use cases with NSubstitute port doubles — business logic in isolation |
+| Integration | 154 | Real SQLite, ClosedXML, filesystem, zip, PdfPig; template extraction and the shipped demo templates; WireMock stub for Resend |
 
 The **Pipeline** tests (inside Integration) are the most comprehensive: they wire the full DI graph (`AddApplication + AddInfrastructure`) against temporary directories and a temporary SQLite database. Extraction is driven through the `IInvoiceDataExtractor` port via an in-memory `FakeInvoiceDataExtractor` (no HTTP, no provider coupling); a WireMock server stubs only Resend. They exercise the entire system end-to-end:
 
