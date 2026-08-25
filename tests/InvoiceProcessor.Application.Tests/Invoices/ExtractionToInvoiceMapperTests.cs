@@ -29,6 +29,43 @@ public sealed class ExtractionToInvoiceMapperTests
             ["supplier_tax_id"] = new("A78374725", 0.88m),
         };
 
+    // Currency is best-effort, not a gate. A local template extractor reads the numbers off the
+    // page and there is rarely a "currency" label to anchor on; rejecting an otherwise perfect
+    // invoice over a missing symbol loses real data to satisfy a field nobody printed.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Map_defaults_to_EUR_when_currency_is_absent(string? absent)
+    {
+        var fields = new Dictionary<string, ExtractedField>(ValidFields());
+        if (absent is null) fields.Remove("currency");
+        else fields["currency"] = new(absent, 0m);
+
+        var result = ExtractionToInvoiceMapper.Map(
+            new ExtractionResult(fields, [], 0.9m), _supplierNormalizer);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("EUR", result.Value.NetAmount.Currency);
+    }
+
+    [Theory]
+    [InlineData("€", "EUR")]
+    [InlineData("$", "USD")]
+    [InlineData("£", "GBP")]
+    [InlineData("usd", "USD")]
+    [InlineData("1.234,00 €", "EUR")]
+    public void Map_normalises_the_currency_it_was_given(string raw, string expected)
+    {
+        var fields = new Dictionary<string, ExtractedField>(ValidFields()) { ["currency"] = new(raw, 0.9m) };
+
+        var result = ExtractionToInvoiceMapper.Map(
+            new ExtractionResult(fields, [], 0.9m), _supplierNormalizer);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(expected, result.Value.NetAmount.Currency);
+    }
+
     [Fact]
     public void Map_returns_success_with_valid_fields()
     {

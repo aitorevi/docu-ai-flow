@@ -26,9 +26,11 @@ public static class ExtractionToInvoiceMapper
             !DateOnly.TryParse(dateField.Value, out var issueDate))
             return Result<Invoice, Error>.Failure(Error.Validation("Fecha de factura ausente o inválida."));
 
-        var currency = fields.TryGetValue("currency", out var currField) ? currField.Value : null;
-        if (string.IsNullOrWhiteSpace(currency))
-            return Result<Invoice, Error>.Failure(Error.Validation("Moneda ausente en la extracción."));
+        // Currency is best-effort, not a gate. Local templates read the numbers off the page and
+        // there is rarely a "currency" label to anchor on; rejecting an otherwise perfect invoice
+        // over a missing symbol would throw away real data to satisfy a field nobody printed.
+        var currency = NormalizeCurrency(
+            fields.TryGetValue("currency", out var currField) ? currField.Value : null);
 
         if (!fields.TryGetValue("net_amount", out var netField) ||
             !decimal.TryParse(netField.Value, System.Globalization.NumberStyles.Any,
@@ -59,5 +61,19 @@ public static class ExtractionToInvoiceMapper
                Money.Create(taxAmount, currency).Bind(tax =>
                Money.Create(totalAmount, currency).Bind(total =>
                Invoice.Create(InvoiceId.New(), numberField.Value!, supplier, issueDate, dueDate, net, tax, total, []))));
+    }
+
+    // Accepts a symbol, an ISO code, or an amount with either embedded. Defaults to EUR.
+    private static string NormalizeCurrency(string? raw)
+    {
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+            if (raw.Contains('€')) return "EUR";
+            if (raw.Contains('$')) return "USD";
+            if (raw.Contains('£')) return "GBP";
+            var letters = new string(raw.Where(char.IsLetter).ToArray()).ToUpperInvariant();
+            if (letters.Length == 3) return letters;
+        }
+        return "EUR";
     }
 }
