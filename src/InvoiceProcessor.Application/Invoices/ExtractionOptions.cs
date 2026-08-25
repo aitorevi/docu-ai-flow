@@ -12,7 +12,7 @@ public sealed class ExtractionOptions
 
     // Consecutive confirmations with no human correction a supplier needs before its invoices
     // skip review and are filed automatically. See SupplierTrust.
-    public int SupplierTrustThreshold { get; init; } = SupplierTrust.DefaultThreshold;
+    public int SupplierTrustThreshold { get; set; } = SupplierTrust.DefaultThreshold;
 
     // Which extraction backend is active. Default = Template (local, via PdfPig, no external
     // credentials needed) so a fresh clone runs offline and for free. Switch to DocumentAi to

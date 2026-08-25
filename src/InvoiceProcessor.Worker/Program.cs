@@ -133,6 +133,8 @@ app.MapGet("/api/health", () => Results.Ok(new
     extractor = activeProvider.ToString(),
 }));
 
+app.MapReviewEndpoints();
+
 app.MapPost("/api/export/{year:int}/{quarter:int}", async (int year, int quarter,
     IExportQuarterToSpreadsheetUseCase useCase, CancellationToken ct) =>
 {
@@ -158,8 +160,9 @@ app.MapPost("/api/send/{year:int}/{quarter:int}", async (int year, int quarter,
     });
 });
 
-// Auto-open browser (skip in CI / test environments)
-if (!Console.IsInputRedirected)
+// Auto-open browser. Skipped when the output is redirected (CI, scripts) and when the API is
+// hosted in-process by the tests.
+if (!Console.IsInputRedirected && !app.Environment.IsEnvironment("Testing"))
 {
     _ = Task.Run(async () =>
     {
@@ -196,3 +199,7 @@ static void LoadDotEnv()
         Environment.SetEnvironmentVariable(key, value);
     }
 }
+
+// Named and public so WebApplicationFactory<Program> can host this exact app in tests: the
+// endpoints are then exercised as they really run, not as a re-declared copy.
+public partial class Program;
