@@ -2,11 +2,13 @@
 
 Folder-watching .NET 10 service that extracts invoice data from PDFs, exports to Excel, and emails quarterly archives to your advisor.
 
-Drop a PDF into `./data/inbox/`. The service detects it, extracts the invoice fields, persists the data in SQLite, archives the original PDF, and regenerates a master Excel spreadsheet. When a quarter closes, one command ZIPs the PDFs and emails them to your tax advisor via [Resend](https://resend.com).
+Drop a PDF into `./data/inbox/`. The service detects it, extracts the invoice fields, and either files it or **holds it for review** depending on how much that supplier has earned the benefit of the doubt. Confirmed invoices are persisted in SQLite, archived, and rolled into a master Excel spreadsheet. When a quarter closes, one command ZIPs the PDFs and emails them to your tax advisor via [Resend](https://resend.com).
 
 Built with **.NET 10**, **C#**, and a strict **hexagonal architecture**. Business errors use the **Result pattern** (`SharpMonads.Core`); infrastructure failures bubble up to Polly.
 
-**It runs with no accounts and no API keys.** Clone it, drop the sample invoices in `data/samples/` into the inbox, and watch the whole pipeline work — extraction included.
+**It runs with no accounts and no API keys.** Clone it, drop the sample invoices in `data/samples/` into the inbox, and watch the whole pipeline work — extraction, review screen and all.
+
+Two ideas carry the project: [pluggable extraction](#pluggable-extraction) behind a single port, and a [human in the loop](#human-in-the-loop) whose corrections decide which suppliers get to skip review.
 
 ### Pluggable extraction
 
@@ -69,6 +71,7 @@ Only the first one is mandatory. Everything else buys an optional capability.
 - **Only** for the OCR fallback on scanned invoices: `poppler` and `tesseract`.
   macOS `brew install poppler tesseract tesseract-lang` · Debian/Ubuntu `apt-get install poppler-utils tesseract-ocr tesseract-ocr-spa`
 - **Only** for email dispatch: a [Resend](https://resend.com) account and a verified domain
+- **Only** to change the UI: [Node.js](https://nodejs.org). The built site is committed, so running the app never needs it.
 - [Claude Code](https://claude.ai/code) (optional, for AI-assisted development)
 - [gh](https://cli.github.com) (optional, for PR management)
 
@@ -108,7 +111,7 @@ dotnet run --project src/InvoiceProcessor.Worker
 
 ### Web dashboard (default mode)
 
-Starting the app opens a browser at `http://localhost:5000` with a dashboard for all operations.
+Starting the app opens a browser at `http://localhost:5000`: a panel for exporting and sending, and **`/review`** for the invoices waiting on a human.
 
 ```bash
 # Windows: double-click run.bat
@@ -145,18 +148,32 @@ Regenerate them any time with `dotnet run --project src/InvoiceProcessor.Worker 
 Drop PDF invoices into `./data/inbox/`. The watcher will:
 1. Detect the file (real-time watcher + polling fallback)
 2. Wait until the file is fully written
-3. Check for duplicates via SHA-256 hash
+3. Check for duplicates — by content hash, and by natural key (invoice number + supplier tax id)
 4. Extract invoice fields with the active extractor (local templates by default)
 5. Normalize the supplier against the catalog in `appsettings.json`
-6. Persist the invoice in SQLite (`./data/invoices.db`)
-7. Archive the PDF to `./data/archive/{year}/{month}/{supplier}/`
-8. Regenerate `./data/output/maestro_facturas.xlsx`
-
-Invoices the extractor could not understand — no text layer, no matching template, a mandatory field it could not parse — are moved to `./data/failed/` for manual entry. So are extractions whose totals do not add up.
+6. **Hold it for review, unless the supplier has earned trust** — see below
+7. Persist the invoice in SQLite (`./data/invoices.db`)
+8. Archive the PDF to `./data/archive/{year}/{month}/{supplier}/`
+9. Regenerate `./data/output/maestro_facturas.xlsx`
 
 From the dashboard you can:
 - **Export Excel** — generate the quarterly spreadsheet ready for your accounting app
 - **Send to advisor** — ZIP and email the quarter's PDFs to your tax advisor (+ CC to yourself if configured)
+
+### Human in the loop
+
+Extraction is never 100% right. The interesting question is not whether a person reviews the results, but **which invoices earn the right to skip review** — and that is decided per supplier, by track record.
+
+A supplier starts untrusted: every invoice of theirs waits in `data/pending/` and shows up at **`/review`**. After `Extraction:SupplierTrustThreshold` consecutive confirmations in which the reviewer changed *nothing* (20 by default), the supplier is trusted and its invoices are filed automatically. **One correction resets the counter to zero and revokes the trust.** Autonomy is earned, per supplier, and can be lost.
+
+The review screen puts the PDF next to the form:
+
+- Each field shows the confidence it was extracted with. Low confidence is amber, so the reviewer knows where to look first; a field the template never captured is greyed out and disabled rather than flagged as an error.
+- Invoices recovered by OCR, and credit notes with negative amounts, carry a banner — both are worth a second look.
+- **Confirm** files the invoice and updates the supplier's trust. **Reject** discards it to `failed/`. **Requeue** returns the PDF to the inbox so it is extracted again — the move you want after fixing a template, and the reason a bad template costs you nothing permanent.
+- A document nobody could read at all (a scan, an unknown supplier) becomes a blank form to fill in by hand, with a `net + tax = total` check before it is accepted.
+
+Extractions whose totals do not add up, or whose confidence is below `Extraction:ConfidenceThreshold`, never reach the queue: they go straight to `./data/failed/`.
 
 ### CLI modes
 
@@ -185,13 +202,13 @@ docu-ai-flow.sln
 Directory.Build.props          # net10.0, Nullable, TreatWarningsAsErrors, SharpMonads.Core
 src/
 ├── InvoiceProcessor.Domain/          # Zero external dependencies
-│   ├── Invoices/                     # Invoice, Money, Supplier, InvoiceLine, InvoiceId
+│   ├── Invoices/                     # Invoice, Money, Supplier, SupplierTrust, InvoiceLine, InvoiceId
 │   ├── Documents/                    # IncomingDocument, DocumentContent, DocumentId
 │   └── Dispatch/                     # Quarter (fiscal rules: ExcelSourceRange, ExcelQuarterFor)
 ├── InvoiceProcessor.Application/     # Use cases + port definitions
-│   ├── Ports/Inbound/                # IProcessInvoiceUseCase, ISendQuarterToAdvisorUseCase, IExportQuarterToSpreadsheetUseCase
-│   ├── Ports/Outbound/               # IInvoiceDataExtractor, IDocumentArchiver, IProcessedInvoiceRepository, …
-│   ├── Invoices/                     # ProcessInvoiceService, ExtractionToInvoiceMapper, StoredInvoice
+│   ├── Ports/Inbound/                # IProcessInvoiceUseCase, IReviewInvoiceUseCase, ISendQuarterToAdvisorUseCase, IExportQuarterToSpreadsheetUseCase
+│   ├── Ports/Outbound/               # IInvoiceDataExtractor, IDocumentArchiver, IPendingInvoiceRepository, ISupplierTrustRepository, …
+│   ├── Invoices/                     # ProcessInvoiceService, ReviewInvoiceService, PendingInvoice, ExtractionToInvoiceMapper
 │   ├── Dispatch/                     # SendQuarterToAdvisorService
 │   └── Export/                       # ExportQuarterToSpreadsheetService
 ├── InvoiceProcessor.Infrastructure/  # Concrete adapters
@@ -202,26 +219,48 @@ src/
 │   ├── Files/                        # FileSystemDocumentReader, FileSystemDocumentArchiver, FileSystemArchivedInvoiceSource, FileStabilityWaiter
 │   ├── Suppliers/                    # CatalogSupplierNormalizer, CompanyOptions
 │   ├── Idempotency/                  # JsonFileProcessedDocumentLog
-│   ├── Persistence/                  # SqliteProcessedInvoiceRepository, SqliteExportedInvoiceLog, SqliteSentInvoiceLog
+│   ├── Persistence/                  # SqliteProcessedInvoiceRepository, SqlitePendingInvoiceRepository, SqliteSupplierTrustRepository, …
 │   ├── Export/                       # ClosedXmlMasterSpreadsheetWriter, ClosedXmlQuarterSpreadsheetExporter
 │   ├── Dispatch/                     # ZipInvoiceArchiveCompressor
 │   └── Mail/                         # ResendAdvisorMailSender
 └── InvoiceProcessor.Worker/          # Composition root + web UI + CLI entry points
-    ├── Program.cs                    # DI wiring, web endpoints, watch / export / send / master modes
+    ├── Program.cs                    # DI wiring, health, export/send endpoints, CLI modes
+    ├── ReviewEndpoints.cs            # /api/pending: queue, detail, PDF, confirm / reject / requeue
+    ├── TemplateDiagnostics.cs        # template-check and dump-text
+    ├── SampleInvoices.cs             # the fictional demo invoices + make-samples
     ├── FolderWatcherService.cs       # BackgroundService: watcher + polling + concurrency gate
-    └── wwwroot/index.html            # Dashboard served at http://localhost:5000
+    └── wwwroot/                      # Astro build output, served at http://localhost:5000
 tests/
 ├── InvoiceProcessor.Domain.Tests/          # Pure unit tests (Money, Invoice, Quarter)
 ├── InvoiceProcessor.Application.Tests/    # Use cases with NSubstitute port doubles
 └── InvoiceProcessor.Integration.Tests/    # Archiver, SQLite repos, Excel writers, zip, watcher stress, mapper golden-master
-    ├── Fixtures/                           # MinimalPdf, FakeInvoiceDataExtractor, RealInvoices/gcp/*.json (anonymized)
+    ├── Api/                                # Endpoint tests against the real host (WebApplicationFactory)
+    ├── Fixtures/                           # MinimalPdf, SyntheticPdf, FakeInvoiceDataExtractor
     ├── Extraction/                         # template extractor + parser, shipped demo templates, Document AI mapper golden-master
-    └── Pipeline/                           # End-to-end pipeline tests (PipelineFixture, Processing, Export, Send)
+    └── Pipeline/                           # End-to-end pipeline tests (Processing, Review, Export, Send)
+frontend/                          # Astro 6 — builds straight into the Worker's wwwroot
+├── src/pages/index.astro          # Panel: export + send
+├── src/pages/review.astro         # Review screen: PDF beside the form
+└── src/layouts, components, scripts, styles
 data/
-├── inbox/      # Drop PDFs here
-├── archive/    # Processed PDFs (year/month/supplier/supplier-number.pdf)
-├── failed/     # PDFs that could not be parsed
-└── output/     # Generated Excel files
+├── samples/     # Fictional invoices to try it with (committed)
+├── inbox/       # Drop PDFs here
+├── pending/     # Held for human review — see /review
+├── archive/     # Filed PDFs (year/month/supplier/supplier-number.pdf)
+├── duplicates/  # Already seen: same bytes, or same invoice number + tax id
+├── failed/      # Rejected, or extractions that did not add up
+└── output/      # Generated Excel files
+```
+
+### Rebuilding the frontend
+
+The built site is committed under `src/InvoiceProcessor.Worker/wwwroot/`, so `dotnet run` works without Node. To change the UI:
+
+```bash
+cd frontend
+npm install
+npm run dev     # HMR at :4321, API proxied to the running Worker
+npm run build   # rebuilds wwwroot
 ```
 
 ## Configuration
@@ -279,7 +318,8 @@ All non-secret settings live in `src/InvoiceProcessor.Worker/appsettings.json`:
   },
   "Extraction": {
     "Provider": "Template",
-    "ConfidenceThreshold": 0.6
+    "ConfidenceThreshold": 0.6,
+    "SupplierTrustThreshold": 20
   },
   "TemplateExtractor": {
     "MinTextLength": 50,
@@ -332,12 +372,13 @@ All non-secret settings live in `src/InvoiceProcessor.Worker/appsettings.json`:
 | `Resend:FromAddress` | Must belong to a domain verified in Resend (DKIM/SPF) |
 | `Resend:CcAddress` | Optional. When set, a copy of every advisor email is sent here |
 | `Extraction:ConfidenceThreshold` | Extractions with lower average confidence are moved to `failed/` |
+| `Extraction:SupplierTrustThreshold` | Consecutive corrections-free confirmations before a supplier's invoices are filed without review (default 20) |
 | `MailDispatch:MaxAttachmentMb` | ZIP size limit before splitting by month (default 38 MB — Resend's hard limit is 40 MB) |
 
 ## Running tests
 
 ```bash
-dotnet test                                  # all 202 tests
+dotnet test                                  # all 250 tests
 dotnet test --filter "Category!=LiveGcp&Category!=RequiresTesseract"   # CI default
 dotnet test --filter "Domain"                # domain unit tests only
 dotnet test --filter "Application"           # use-case unit tests only
@@ -353,9 +394,9 @@ Two tests are excluded from CI. `GoogleDocumentAiExtractorLiveTests` (`Category=
 
 | Layer | Count | What they cover |
 |---|---|---|
-| Domain | 23 | `Money`, `Invoice`, `Quarter` — pure business rules, no dependencies |
-| Application | 25 | Use cases with NSubstitute port doubles — business logic in isolation |
-| Integration | 154 | Real SQLite, ClosedXML, filesystem, zip, PdfPig; template extraction and the shipped demo templates; WireMock stub for Resend |
+| Domain | 28 | `Money`, `Invoice`, `Quarter`, `SupplierTrust` — pure business rules, no dependencies |
+| Application | 45 | Use cases with NSubstitute port doubles — processing, review, trust, export, send |
+| Integration | 177 | Real SQLite, ClosedXML, filesystem, zip, PdfPig; template extraction and the shipped demo templates; the API through `WebApplicationFactory`; WireMock stub for Resend |
 
 The **Pipeline** tests (inside Integration) are the most comprehensive: they wire the full DI graph (`AddApplication + AddInfrastructure`) against temporary directories and a temporary SQLite database. Extraction is driven through the `IInvoiceDataExtractor` port via an in-memory `FakeInvoiceDataExtractor` (no HTTP, no provider coupling); a WireMock server stubs only Resend. They exercise the entire system end-to-end:
 
