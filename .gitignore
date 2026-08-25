@@ -9,6 +9,10 @@
 **/obj/
 **/*.user
 
+# Node (frontend)
+node_modules/
+frontend/.astro/
+
 # Runtime data (kept via .gitkeep, actual content excluded)
 data/*.db
 data/*.jsonl
@@ -17,6 +21,8 @@ data/output/*.zip
 data/inbox/*.pdf
 data/archive/
 data/failed/
+data/pending/
+data/duplicates/
 
 # Stale dev artefact — app now resolves paths from repo root
 src/InvoiceProcessor.Worker/data/

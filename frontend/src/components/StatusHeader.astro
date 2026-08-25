@@ -1,0 +1,79 @@
+---
+interface Props {
+  title: string;
+}
+const { title } = Astro.props;
+---
+<div class="header">
+  <h1>{title}</h1>
+  <div class="status">
+    <span class="extractor-badge" id="extractor-badge" hidden></span>
+    <span class="dot" id="status-dot"></span>
+    <span id="status-text">Comprobando...</span>
+  </div>
+</div>
+
+<style>
+  /* Which extractor is bound to the port, visible at all times. It is the single most useful
+     thing to know about a running instance, and a misconfigured provider is otherwise silent. */
+  .extractor-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+    margin-right: 8px;
+  }
+  .extractor-badge.local { background: #dcfce7; color: #166534; }
+  .extractor-badge.cloud { background: #dbeafe; color: #1e40af; }
+</style>
+
+<script>
+  interface Health {
+    status: string;
+    extractor?: string;
+    invoiceCount?: number;
+    pendingReview?: number;
+  }
+
+  async function checkStatus(): Promise<void> {
+    const dot = document.getElementById('status-dot');
+    const text = document.getElementById('status-text');
+    if (!dot || !text) return;
+    try {
+      const r = await fetch('/api/health');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = (await r.json()) as Health;
+
+      dot.style.background = '#86efac';
+      text.textContent =
+        `Watcher activo · ${data.invoiceCount ?? 0} facturas · ${data.pendingReview ?? 0} por revisar`;
+
+      const badge = document.getElementById('extractor-badge');
+      if (badge && data.extractor) {
+        const isLocal = data.extractor === 'Template';
+        badge.textContent = isLocal ? 'Extracción local' : 'Document AI';
+        badge.className = `extractor-badge ${isLocal ? 'local' : 'cloud'}`;
+        badge.hidden = false;
+      }
+    } catch {
+      dot.style.background = '#fca5a5';
+      text.textContent = 'Sin conexión';
+    }
+  }
+
+  let statusIntervalId: ReturnType<typeof setInterval> | null = null;
+
+  document.addEventListener('astro:before-swap', () => {
+    if (statusIntervalId !== null) {
+      clearInterval(statusIntervalId);
+      statusIntervalId = null;
+    }
+  });
+
+  document.addEventListener('astro:page-load', () => {
+    if (!document.getElementById('status-dot')) return;
+    void checkStatus();
+    statusIntervalId = setInterval(checkStatus, 30000);
+  });
+</script>

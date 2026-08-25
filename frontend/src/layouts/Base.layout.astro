@@ -1,0 +1,118 @@
+---
+import '../styles/global.css';
+import { ClientRouter } from 'astro:transitions';
+interface Props {
+  title: string;
+}
+const { title } = Astro.props;
+---
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <ClientRouter />
+  </head>
+  <body>
+    <nav class="topnav">
+      <div class="topnav-links">
+        <a href="/" class="nav-link" data-path="/">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+          <span>Panel</span>
+        </a>
+        <a href="/review" class="nav-link" data-path="/review">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <span>Revisar</span><span id="review-badge" class="nav-badge" hidden></span>
+        </a>
+      </div>
+    </nav>
+
+    <main class="page">
+      <slot />
+    </main>
+
+    <style>
+      .topnav {
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+        min-height: 56px;
+        padding: 8px 20px;
+        background: #fff;
+        border-bottom: 1px solid #e5e7eb;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .04);
+      }
+      .topnav-links {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .nav-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        font-size: 13px;
+        font-weight: 500;
+        color: #374151;
+        text-decoration: none;
+        transition: background .15s, color .15s;
+      }
+      .nav-link svg { width: 18px; height: 18px; flex-shrink: 0; }
+      .nav-link:hover { background: #f3f4f6; color: #111827; }
+      .nav-link.active { background: #eef2ff; color: #1e40af; }
+      .nav-badge {
+        min-width: 18px;
+        padding: 0 6px;
+        border-radius: 999px;
+        background: #f59e0b;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 18px;
+        text-align: center;
+      }
+    </style>
+
+    <script>
+      // How many invoices are waiting for a human. Worth a badge: it is the only number in this
+      // app that asks the user to do something.
+      function setBadge(id: string, n: number): void {
+        const badge = document.getElementById(id);
+        if (!badge) return;
+        if (n > 0) { badge.textContent = String(n); badge.hidden = false; }
+        else { badge.hidden = true; }
+      }
+
+      async function loadBadges(): Promise<void> {
+        try {
+          const r = await fetch('/api/health');
+          if (r.ok) setBadge('review-badge', ((await r.json()) as { pendingReview?: number }).pendingReview ?? 0);
+        } catch { /* best-effort */ }
+      }
+
+      // Pages fire this on their success paths so the badge updates immediately after an action,
+      // without waiting for the next navigation.
+      window.addEventListener('app:data-changed', () => { void loadBadges(); });
+
+      document.addEventListener('astro:page-load', () => {
+        const path = location.pathname.replace(/\/+$/, '') || '/';
+        document.querySelectorAll<HTMLAnchorElement>('.nav-link').forEach(a => {
+          const p = a.dataset.path ?? '';
+          const active = p === '/' ? path === '/' : path === p || path.startsWith(p + '/');
+          a.classList.toggle('active', active);
+        });
+
+        void loadBadges();
+      });
+    </script>
+  </body>
+</html>

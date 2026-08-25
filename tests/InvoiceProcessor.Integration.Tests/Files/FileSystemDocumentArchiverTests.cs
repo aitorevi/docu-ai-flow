@@ -24,6 +24,10 @@ public sealed class FileSystemDocumentArchiverTests : IDisposable
             Archive = _archive,
             Failed = _failed,
             Output = Path.Combine(_root, "output"),
+            // Every folder is pinned under the temp root — a default left in place resolves
+            // against the current directory and writes stray files into the repo.
+            Pending = Path.Combine(_root, "pending"),
+            Duplicates = Path.Combine(_root, "duplicates"),
             MaxConcurrency = 1,
             PollSeconds = 5
         };

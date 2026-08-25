@@ -1,0 +1,39 @@
+---
+---
+<div class="log" id="event-log">
+  <p class="info">Esperando acciones...</p>
+</div>
+
+<script>
+  function addLog(msg: string, cls: string): void {
+    const log = document.getElementById('event-log');
+    if (!log) return;
+    const initial = log.querySelector('.info');
+    if (initial?.textContent === 'Esperando acciones...') {
+      log.innerHTML = '';
+    }
+    const p = document.createElement('p');
+    if (cls) p.className = cls;
+    p.textContent = msg;
+    log.appendChild(p);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  let appLogHandler: ((e: Event) => void) | null = null;
+
+  document.addEventListener('astro:before-swap', () => {
+    if (appLogHandler) {
+      window.removeEventListener('app:log', appLogHandler);
+      appLogHandler = null;
+    }
+  });
+
+  document.addEventListener('astro:page-load', () => {
+    if (!document.getElementById('event-log')) return;
+    appLogHandler = (e: Event) => {
+      const detail = (e as CustomEvent<{ msg: string; cls: string }>).detail;
+      addLog(detail.msg, detail.cls);
+    };
+    window.addEventListener('app:log', appLogHandler);
+  });
+</script>
