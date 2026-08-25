@@ -11,6 +11,7 @@ using InvoiceProcessor.Infrastructure.Persistence;
 using InvoiceProcessor.Infrastructure.Suppliers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace InvoiceProcessor.Infrastructure;
 
@@ -57,11 +58,12 @@ public static class DependencyInjection
 
         services.AddSingleton<IProcessedDocumentLog>(sp =>
         {
-            var config = sp.GetRequiredService<IConfiguration>();
-            var dataPath = config.GetValue<string>("Folders:Inbox") ?? "./data";
-            var logDir = Path.GetDirectoryName(Path.GetFullPath(dataPath)) ?? ".";
-            var logPath = Path.Combine(logDir, "processed.jsonl");
-            return new JsonFileProcessedDocumentLog(logPath);
+            // Resolved from the options, not from raw configuration, so it follows the same data
+            // root as every other folder — including when a test relocates the whole tree.
+            var folders = sp.GetRequiredService<IOptions<FolderOptions>>().Value;
+            var logDir = Path.GetDirectoryName(Path.GetFullPath(folders.Inbox)) ?? ".";
+            Directory.CreateDirectory(logDir);
+            return new JsonFileProcessedDocumentLog(Path.Combine(logDir, "processed.jsonl"));
         });
 
         services.AddSingleton<SqliteProcessedInvoiceRepository>();
