@@ -6,7 +6,9 @@ using InvoiceProcessor.Application.Export;
 using InvoiceProcessor.Application.Invoices;
 using InvoiceProcessor.Application.Ports.Inbound;
 using InvoiceProcessor.Application.Ports.Outbound;
+using InvoiceProcessor.Domain;
 using InvoiceProcessor.Domain.Documents;
+using InvoiceProcessor.Domain.Invoices;
 using InvoiceProcessor.Infrastructure;
 using InvoiceProcessor.Infrastructure.Files;
 using InvoiceProcessor.Infrastructure.Mail;
@@ -15,6 +17,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using WireMock.RequestBuilders;
 using WireMock.ResponseBuilders;
+using SharpMonads.Core;
 using WireMock.Server;
 
 namespace InvoiceProcessor.Integration.Tests.Pipeline;
@@ -36,8 +39,15 @@ public sealed class PipelineFixture : IDisposable
     public static readonly ExtractionResult ValidInvoiceQ2B = Extraction(
         0.942m, "F2026-002", "Test Supplier S.L.", "B12345678", "2026-04-15", "200.00", "42.00", "242.00");
 
+    public static readonly ExtractionResult ValidInvoiceQ2C = Extraction(
+        0.938m, "F2026-003", "Test Supplier S.L.", "B12345678", "2026-05-02", "300.00", "63.00", "363.00");
+
     public static readonly ExtractionResult LowConfidence =
         new(new Dictionary<string, ExtractedField>(), [], 0.3m);
+
+    // The extractor understood nothing at all — a scan, or a supplier with no template.
+    public static readonly ExtractionResult RequiresManualEntry =
+        new(new Dictionary<string, ExtractedField>(), [], 0m, RequiresManualEntry: true);
 
     private static ExtractionResult Extraction(
         decimal confidence, string invoiceNumber, string supplierName, string supplierTaxId,
@@ -63,6 +73,8 @@ public sealed class PipelineFixture : IDisposable
     public string ArchivePath { get; }
     public string FailedPath { get; }
     public string OutputPath { get; }
+    public string PendingPath { get; }
+    public string DuplicatesPath { get; }
 
     public PipelineFixture()
     {
@@ -71,8 +83,10 @@ public sealed class PipelineFixture : IDisposable
         ArchivePath = Path.Combine(_root, "archive");
         FailedPath  = Path.Combine(_root, "failed");
         OutputPath  = Path.Combine(_root, "output");
+        PendingPath = Path.Combine(_root, "pending");
+        DuplicatesPath = Path.Combine(_root, "duplicates");
 
-        foreach (var dir in new[] { InboxPath, ArchivePath, FailedPath, OutputPath })
+        foreach (var dir in new[] { InboxPath, ArchivePath, FailedPath, OutputPath, PendingPath, DuplicatesPath })
             Directory.CreateDirectory(dir);
 
         _server = WireMockServer.Start();
@@ -86,10 +100,14 @@ public sealed class PipelineFixture : IDisposable
                 ["Folders:Archive"]        = ArchivePath,
                 ["Folders:Failed"]         = FailedPath,
                 ["Folders:Output"]         = OutputPath,
+                ["Folders:Pending"]        = PendingPath,
+                ["Folders:Duplicates"]     = DuplicatesPath,
                 ["Folders:MaxConcurrency"] = "3",
                 ["Folders:PollSeconds"]    = "5",
                 ["Database:Path"]          = dbPath,
                 ["Extraction:ConfidenceThreshold"] = "0.6",
+                // Small threshold so a test can walk a supplier all the way to trusted.
+                ["Extraction:SupplierTrustThreshold"] = "3",
                 ["Resend:ApiBaseUrl"]       = _server.Url!,
                 ["Resend:ApiKey"]           = "test-key",
                 ["Resend:FromName"]         = "Test Sender",
@@ -166,6 +184,59 @@ public sealed class PipelineFixture : IDisposable
         var doc   = new IncomingDocument(
             DocumentId.New(), Path.GetFileName(pdfPath), pdfPath, hash, DateTimeOffset.UtcNow);
         return await useCase.ExecuteAsync(doc, ct);
+    }
+
+    // ── Review helpers ───────────────────────────────────────────────────────
+
+    public async Task<IReadOnlyList<PendingInvoice>> PendingAsync(CancellationToken ct = default)
+    {
+        using var scope = _provider.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IReviewInvoiceUseCase>().GetPendingAsync(ct);
+    }
+
+    // Confirms a pending invoice exactly as captured — the "the extractor got it right" case.
+    public Task<Result<ConfirmResult, Error>> ConfirmAsync(PendingInvoice p, CancellationToken ct = default) =>
+        ConfirmAsync(p, AsSubmitted(p), ct);
+
+    public async Task<Result<ConfirmResult, Error>> ConfirmAsync(
+        PendingInvoice p, CorrectedInvoiceFields fields, CancellationToken ct = default)
+    {
+        using var scope = _provider.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IReviewInvoiceUseCase>()
+            .ConfirmAsync(p.ContentHash, fields, ct);
+    }
+
+    public async Task<Result<RejectResult, Error>> RejectAsync(PendingInvoice p, CancellationToken ct = default)
+    {
+        using var scope = _provider.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IReviewInvoiceUseCase>()
+            .RejectAsync(p.ContentHash, ct);
+    }
+
+    public async Task<Result<RequeueResult, Error>> RequeueAsync(PendingInvoice p, CancellationToken ct = default)
+    {
+        using var scope = _provider.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IReviewInvoiceUseCase>()
+            .RequeueAsync(p.ContentHash, ct);
+    }
+
+    public static CorrectedInvoiceFields AsSubmitted(PendingInvoice p) => new(
+        p.InvoiceNumber, p.SupplierName, p.SupplierTaxId, p.IssueDate, p.DueDate,
+        p.NetAmount, p.TaxAmount, p.TotalAmount, p.Currency);
+
+    // Marks a supplier as already trusted, so a test can exercise the automatic path without
+    // first confirming N invoices by hand.
+    public async Task TrustSupplierAsync(string taxId, CancellationToken ct = default)
+    {
+        using var scope = _provider.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<ISupplierTrustRepository>()
+            .SaveAsync(new SupplierTrust(taxId, 99, IsTrusted: true), ct);
+    }
+
+    public async Task<SupplierTrust?> GetTrustAsync(string taxId, CancellationToken ct = default)
+    {
+        using var scope = _provider.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<ISupplierTrustRepository>().GetAsync(taxId, ct);
     }
 
     public async Task<ExportResult> ExportAsync(int year, int quarter, CancellationToken ct = default)

@@ -1,3 +1,5 @@
+using InvoiceProcessor.Domain.Invoices;
+
 namespace InvoiceProcessor.Application.Invoices;
 
 // The extraction backends bound to IInvoiceDataExtractor. Which one is active is a
@@ -7,6 +9,10 @@ public enum ExtractionProvider { Template, DocumentAi }
 public sealed class ExtractionOptions
 {
     public decimal ConfidenceThreshold { get; init; } = 0.6m;
+
+    // Consecutive confirmations with no human correction a supplier needs before its invoices
+    // skip review and are filed automatically. See SupplierTrust.
+    public int SupplierTrustThreshold { get; init; } = SupplierTrust.DefaultThreshold;
 
     // Which extraction backend is active. Default = Template (local, via PdfPig, no external
     // credentials needed) so a fresh clone runs offline and for free. Switch to DocumentAi to

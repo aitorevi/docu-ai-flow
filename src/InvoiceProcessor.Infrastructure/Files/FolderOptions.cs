@@ -10,6 +10,8 @@ public sealed class FolderOptions
     public string Inbox { get; set; } = "./data/inbox";
     public string Archive { get; set; } = "./data/archive";
     public string Failed { get; set; } = "./data/failed";
+    public string Pending { get; set; } = "./data/pending";
+    public string Duplicates { get; set; } = "./data/duplicates";
     public string Output { get; set; } = "./data/output";
     public int MaxConcurrency { get; init; } = 3;
     public int PollSeconds { get; init; } = 5;

@@ -97,5 +97,8 @@ public sealed class ClosedXmlMasterSpreadsheetWriterTests : IDisposable
 
         public Task MarkDeclaredAsync(
             IEnumerable<string> contentHashes, Quarter quarter, CancellationToken ct) => Task.CompletedTask;
+
+        public Task<bool> ExistsByNaturalKeyAsync(
+            string invoiceNumber, string supplierTaxId, CancellationToken ct) => Task.FromResult(false);
     }
 }
