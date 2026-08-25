@@ -4,7 +4,7 @@ namespace InvoiceProcessor.Integration.Tests.Fixtures;
 
 public static class MinimalPdf
 {
-    // Minimal valid PDF — content is irrelevant because LlamaParse is stubbed in pipeline tests.
+    // Minimal valid PDF with no text layer — stands in for a scanned document.
     private static readonly byte[] _bytes = Encoding.ASCII.GetBytes(
         "%PDF-1.4\n" +
         "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n" +

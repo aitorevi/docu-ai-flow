@@ -3,7 +3,6 @@ using InvoiceProcessor.Application.Ports.Outbound;
 using InvoiceProcessor.Infrastructure.Dispatch;
 using InvoiceProcessor.Infrastructure.Export;
 using InvoiceProcessor.Infrastructure.Extraction.DocumentAi;
-using InvoiceProcessor.Infrastructure.Extraction.LlamaParse;
 using InvoiceProcessor.Infrastructure.Extraction.Templates;
 using InvoiceProcessor.Infrastructure.Files;
 using InvoiceProcessor.Infrastructure.Idempotency;
@@ -21,7 +20,6 @@ public static class DependencyInjection
         this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<FolderOptions>(configuration.GetSection("Folders"));
-        services.Configure<LlamaParseOptions>(configuration.GetSection("LlamaParse"));
         services.Configure<GoogleDocumentAiOptions>(configuration.GetSection("GoogleDocumentAi"));
         services.Configure<CompanyOptions>(configuration.GetSection("Company"));
         services.Configure<ExtractionOptions>(configuration.GetSection("Extraction"));
