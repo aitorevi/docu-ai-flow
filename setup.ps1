@@ -29,7 +29,7 @@ Write-Host " OK ($dotnetVersion)" -ForegroundColor Green
 
 # 2. Crear carpetas de datos
 Write-Host "Creando carpetas de datos..." -NoNewline
-$folders = @("data\inbox", "data\archive", "data\failed", "data\output")
+$folders = @("data\inbox", "data\archive", "data\failed", "data\output", "data\pending", "data\duplicates")
 foreach ($f in $folders) {
     New-Item -ItemType Directory -Path $f -Force | Out-Null
 }
@@ -41,12 +41,13 @@ if (-not (Test-Path ".env")) {
     Copy-Item ".env.example" ".env"
     Write-Host " OK (creado .env desde .env.example)" -ForegroundColor Green
     Write-Host ""
-    Write-Host "IMPORTANTE: Edita el fichero .env con tus claves API:" -ForegroundColor Yellow
-    Write-Host "  LlamaParse__ApiKey  → tu clave de LlamaParse (llx-...)" -ForegroundColor Yellow
-    Write-Host "  Resend__ApiKey      → tu clave de Resend (re_...)" -ForegroundColor Yellow
-    Write-Host "  Resend__FromAddress → tu direccion de correo verificada en Resend" -ForegroundColor Yellow
-    Write-Host "  Resend__AdvisorAddress → correo del asesor" -ForegroundColor Yellow
-    Write-Host "  Resend__CcAddress   → tu correo personal para recibir copia (opcional)" -ForegroundColor Yellow
+    Write-Host "El .env es OPCIONAL: sin tocarlo, la app usa el extractor local" -ForegroundColor Cyan
+    Write-Host "(por plantillas), sin nube y sin credenciales." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Editalo solo si quieres:" -ForegroundColor Yellow
+    Write-Host "  Extraction__Provider=DocumentAi        → extraer con Google Document AI" -ForegroundColor Yellow
+    Write-Host "  TemplateExtractor__OcrFallback__Enabled → OCR para facturas escaneadas" -ForegroundColor Yellow
+    Write-Host "  Resend__ApiKey / FromAddress / AdvisorAddress → enviar el trimestre por correo" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "Puedes editar .env con el Bloc de notas:" -ForegroundColor Cyan
     Write-Host "  notepad .env" -ForegroundColor Cyan
