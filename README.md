@@ -208,6 +208,9 @@ A supplier starts untrusted: every invoice of theirs waits in `data/pending/` an
 
 The review screen puts the PDF next to the form:
 
+![The review screen: the invoice PDF on the left, the extracted fields and their confidence on the right](docs/img/review.png)
+
+
 - Each field shows the confidence it was extracted with. Low confidence is amber, so the reviewer knows where to look first; a field the template never captured is greyed out and disabled rather than flagged as an error.
 - Invoices recovered by OCR, and credit notes with negative amounts, carry a banner — both are worth a second look.
 - **Confirm** files the invoice and updates the supplier's trust. **Reject** discards it to `failed/`. **Requeue** returns the PDF to the inbox so it is extracted again — the move you want after fixing a template, and the reason a bad template costs you nothing permanent.
