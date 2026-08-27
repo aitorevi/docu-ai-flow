@@ -8,73 +8,234 @@ const years = [currentYear + 1, currentYear, currentYear - 1];
 const quarters = [1, 2, 3, 4];
 ---
 <Base title="Panel — docu-ai-flow">
-  <div class="card">
-    <StatusHeader title="Procesador de facturas" />
+  <div class="stack">
+    <StatusHeader
+      title="Procesador de facturas"
+      subtitle="Deja los PDF en data/inbox/. Las facturas de proveedores de confianza se archivan solas; el resto esperan en Revisar." />
 
-    <div class="section">
-      <p class="page-blurb">
-        Deja los PDF en <code>data/inbox/</code>. Las facturas de proveedores de confianza se
-        archivan solas; el resto esperan en <a href="/review">Revisar</a>.
-      </p>
-    </div>
-
-    <div class="section">
-      <h2>Exportar trimestre</h2>
-      <div class="row">
-        <div class="field">
-          <label for="export-year">Año</label>
-          <select id="export-year">
-            {years.map(y => <option value={y} selected={y === currentYear}>{y}</option>)}
-          </select>
-        </div>
-        <div class="field">
-          <label for="export-quarter">Trimestre</label>
-          <select id="export-quarter">
-            {quarters.map(q => <option value={q}>T{q}</option>)}
-          </select>
-        </div>
-        <button id="btn-export" class="btn">Generar Excel</button>
+    <!-- KPI row. Four headline numbers, no chart: a one-bar bar chart would say less. -->
+    <section class="tiles">
+      <div class="tile hero">
+        <span class="tile-label">Por revisar</span>
+        <span class="tile-value" id="kpi-pending">—</span>
+        <span class="tile-note" id="kpi-pending-note">&nbsp;</span>
       </div>
-    </div>
-
-    <div class="section">
-      <h2>Enviar al asesor</h2>
-      <div class="row">
-        <div class="field">
-          <label for="send-year">Año</label>
-          <select id="send-year">
-            {years.map(y => <option value={y} selected={y === currentYear}>{y}</option>)}
-          </select>
-        </div>
-        <div class="field">
-          <label for="send-quarter">Trimestre</label>
-          <select id="send-quarter">
-            {quarters.map(q => <option value={q}>T{q}</option>)}
-          </select>
-        </div>
-        <button id="btn-send" class="btn btn-secondary">Enviar ZIP</button>
+      <div class="tile">
+        <span class="tile-label">Archivadas</span>
+        <span class="tile-value" id="kpi-archived">—</span>
+        <span class="tile-note">facturas registradas</span>
       </div>
-      <p class="hint">Requiere una clave de Resend configurada en <code>.env</code>.</p>
-    </div>
+      <div class="tile">
+        <span class="tile-label">Total facturado</span>
+        <span class="tile-value" id="kpi-total">—</span>
+        <span class="tile-note" id="kpi-total-note">&nbsp;</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">Proveedores automáticos</span>
+        <span class="tile-value" id="kpi-trusted">—</span>
+        <span class="tile-note" id="kpi-trusted-note">&nbsp;</span>
+      </div>
+    </section>
 
-    <EventLog />
+    <!-- The idea the project is really about, made visible without a single click. -->
+    <section class="card">
+      <div class="card-head">
+        <h2>Confianza por proveedor</h2>
+        <span class="card-hint" id="trust-hint"></span>
+      </div>
+      <div class="card-body">
+        <div id="trust-root">
+          <p class="empty">Cargando…</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Trimestre</h2>
+        <span class="card-hint">Excel para la gestoría, o el ZIP directamente al asesor</span>
+      </div>
+      <div class="card-body actions-grid">
+        <div class="action">
+          <span class="action-title">Exportar Excel</span>
+          <div class="field-row">
+            <div class="field">
+              <label for="export-year">Año</label>
+              <select id="export-year">
+                {years.map(y => <option value={y} selected={y === currentYear}>{y}</option>)}
+              </select>
+            </div>
+            <div class="field">
+              <label for="export-quarter">Trimestre</label>
+              <select id="export-quarter">
+                {quarters.map(q => <option value={q}>T{q}</option>)}
+              </select>
+            </div>
+            <button id="btn-export" class="btn">Generar</button>
+          </div>
+        </div>
+
+        <div class="action">
+          <span class="action-title">Enviar al asesor</span>
+          <div class="field-row">
+            <div class="field">
+              <label for="send-year">Año</label>
+              <select id="send-year">
+                {years.map(y => <option value={y} selected={y === currentYear}>{y}</option>)}
+              </select>
+            </div>
+            <div class="field">
+              <label for="send-quarter">Trimestre</label>
+              <select id="send-quarter">
+                {quarters.map(q => <option value={q}>T{q}</option>)}
+              </select>
+            </div>
+            <button id="btn-send" class="btn btn-secondary">Enviar ZIP</button>
+          </div>
+          <p class="action-hint">Requiere una clave de Resend en <code class="inline-code">.env</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Actividad</h2></div>
+      <div class="card-body"><EventLog /></div>
+    </section>
   </div>
 </Base>
 
 <style>
-  .page-blurb code {
-    background: #f3f4f6;
-    padding: 1px 5px;
-    border-radius: 4px;
-    font-size: 12px;
+  .actions-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
   }
-  .hint { margin-top: 10px; font-size: 12px; color: #9ca3af; }
-  .hint code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; }
+  @media (max-width: 780px) { .actions-grid { grid-template-columns: 1fr; } }
+  .action { display: flex; flex-direction: column; gap: 10px; }
+  .action-title { font-size: 13px; font-weight: 550; }
+  .action-hint { font-size: 12px; color: var(--text-muted); }
 </style>
 
 <script>
+  interface Supplier {
+    name: string;
+    taxId: string | null;
+    archivedCount: number;
+    pendingCount: number;
+    unmodifiedCount: number;
+    isTrusted: boolean;
+  }
+
+  interface Dashboard {
+    pendingReview: number;
+    archivedInvoices: number;
+    totalAmount: number;
+    currency: string;
+    trustThreshold: number;
+    trustedSuppliers: number;
+    suppliers: Supplier[];
+  }
+
   function log(msg: string, cls: 'ok' | 'err' | 'info'): void {
     window.dispatchEvent(new CustomEvent('app:log', { detail: { msg, cls } }));
+  }
+
+  function esc(v: string | number | null): string {
+    return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  }
+
+  function setText(id: string, value: string, idle = false): void {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = value;
+    el.classList.toggle('is-idle', idle);
+  }
+
+  const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  const CLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+
+  function supplierRow(s: Supplier, threshold: number): string {
+    const count = Math.min(s.unmodifiedCount, threshold);
+    const pct = threshold > 0 ? Math.round((count / threshold) * 100) : 0;
+    // The pill carries an icon and a word: colour never carries the state on its own.
+    const pill = s.isTrusted
+      ? `<span class="pill good">${CHECK} Automático</span>`
+      : `<span class="pill review">${CLOCK} En revisión</span>`;
+    const meter = s.isTrusted
+      ? `<div class="meter"><div class="meter-track"><div class="meter-fill full" style="width:100%"></div></div>
+           <span class="meter-count">${threshold} / ${threshold}</span></div>`
+      : `<div class="meter"><div class="meter-track"><div class="meter-fill" style="width:${pct}%"></div></div>
+           <span class="meter-count">${count} / ${threshold}</span></div>`;
+
+    return `
+      <tr>
+        <td>
+          <div class="supplier-name">${esc(s.name)}</div>
+          ${s.taxId ? `<div class="supplier-tax">${esc(s.taxId)}</div>` : ''}
+        </td>
+        <td>${meter}</td>
+        <td>${pill}</td>
+        <td class="num">${s.pendingCount || '—'}</td>
+        <td class="num">${s.archivedCount || '—'}</td>
+      </tr>`;
+  }
+
+  function renderTrust(d: Dashboard): void {
+    const root = document.getElementById('trust-root');
+    const hint = document.getElementById('trust-hint');
+    if (!root) return;
+
+    if (hint) {
+      hint.textContent = `Automático tras ${d.trustThreshold} confirmaciones seguidas sin correcciones`;
+    }
+
+    if (d.suppliers.length === 0) {
+      root.innerHTML = `<p class="empty">Todavía no ha pasado ninguna factura.<br>
+        Copia <code class="inline-code">data/samples/*.pdf</code> a <code class="inline-code">data/inbox/</code> para probarlo.</p>`;
+      return;
+    }
+
+    root.innerHTML = `
+      <table class="trust-table">
+        <thead>
+          <tr>
+            <th>Proveedor</th>
+            <th>Confianza</th>
+            <th>Estado</th>
+            <th class="num">Pendientes</th>
+            <th class="num">Archivadas</th>
+          </tr>
+        </thead>
+        <tbody>${d.suppliers.map(s => supplierRow(s, d.trustThreshold)).join('')}</tbody>
+      </table>`;
+  }
+
+  async function loadDashboard(): Promise<void> {
+    try {
+      const r = await fetch('/api/dashboard');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = (await r.json()) as Dashboard;
+
+      setText('kpi-pending', String(d.pendingReview), d.pendingReview === 0);
+      setText('kpi-pending-note', d.pendingReview === 0 ? 'todo al día' : 'esperan una persona');
+      setText('kpi-archived', String(d.archivedInvoices), d.archivedInvoices === 0);
+      setText('kpi-total',
+        d.totalAmount.toLocaleString('es-ES', { style: 'currency', currency: d.currency || 'EUR' }),
+        d.archivedInvoices === 0);
+      setText('kpi-total-note', 'suma de las archivadas');
+
+      const total = d.suppliers.length;
+      setText('kpi-trusted', `${d.trustedSuppliers}`, d.trustedSuppliers === 0);
+      setText('kpi-trusted-note', total === 0 ? 'sin proveedores aún' : `de ${total} conocido(s)`);
+
+      renderTrust(d);
+    } catch (err: unknown) {
+      const root = document.getElementById('trust-root');
+      if (root) {
+        root.innerHTML = `<p class="empty">No se pudo cargar el panel: ${esc(
+          err instanceof Error ? err.message : String(err))}</p>`;
+      }
+    }
   }
 
   function selected(id: string): string {
@@ -96,6 +257,9 @@ const quarters = [1, 2, 3, 4];
   }
 
   document.addEventListener('astro:page-load', () => {
+    if (!document.getElementById('trust-root')) return;
+    void loadDashboard();
+
     const exportBtn = document.getElementById('btn-export') as HTMLButtonElement | null;
     const sendBtn = document.getElementById('btn-send') as HTMLButtonElement | null;
 
@@ -103,12 +267,13 @@ const quarters = [1, 2, 3, 4];
       const year = selected('export-year');
       const quarter = selected('export-quarter');
       try {
-        const res = (await post(`/api/export/${year}/${quarter}`, exportBtn, 'Generando...')) as
+        const res = (await post(`/api/export/${year}/${quarter}`, exportBtn, 'Generando…')) as
           { nothingNew: boolean; exported: number; filePath: string };
         log(res.nothingNew
           ? `Nada nuevo que exportar para ${year} T${quarter}.`
           : `${res.exported} factura(s) exportadas → ${res.filePath}`, res.nothingNew ? 'info' : 'ok');
         window.dispatchEvent(new CustomEvent('app:data-changed'));
+        void loadDashboard();
       } catch (err: unknown) {
         log(`Error al exportar: ${err instanceof Error ? err.message : String(err)}`, 'err');
       }
@@ -118,7 +283,7 @@ const quarters = [1, 2, 3, 4];
       const year = selected('send-year');
       const quarter = selected('send-quarter');
       try {
-        const res = (await post(`/api/send/${year}/${quarter}`, sendBtn, 'Enviando...')) as
+        const res = (await post(`/api/send/${year}/${quarter}`, sendBtn, 'Enviando…')) as
           { nothingNew: boolean; sent: number; parts: number; quarter: string };
         log(res.nothingNew
           ? `Nada nuevo que enviar para ${res.quarter}.`

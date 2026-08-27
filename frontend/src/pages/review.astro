@@ -5,20 +5,27 @@ import EventLog from '../components/EventLog.astro';
 import ConfirmModal from '../components/ConfirmModal.astro';
 ---
 <Base title="Revisar facturas — docu-ai-flow">
-  <div class="card review-card">
-    <StatusHeader title="Revisar facturas" />
-    <div class="blurb-row">
-      <p class="page-blurb">Facturas de proveedores que aún no se han ganado la confianza del sistema. Compara los datos con el PDF y confirma o corrige antes de archivarlas.</p>
-      <span id="queue-count" class="queue-count"></span>
-    </div>
+  <div class="stack wide review-card">
+    <StatusHeader
+      title="Revisar facturas"
+      subtitle="Proveedores que aún no se han ganado la confianza del sistema. Compara con el PDF y confirma o corrige antes de archivar." />
 
-    <div class="section">
-      <div id="review-root">
-        <p class="info">Cargando...</p>
+    <section class="card">
+      <div class="card-head">
+        <h2>Cola de revisión</h2>
+        <span id="queue-count" class="pill info"></span>
       </div>
-    </div>
+      <div class="card-body">
+        <div id="review-root">
+          <p class="empty">Cargando…</p>
+        </div>
+      </div>
+    </section>
 
-    <EventLog />
+    <section class="card">
+      <div class="card-head"><h2>Actividad</h2></div>
+      <div class="card-body"><EventLog /></div>
+    </section>
   </div>
   <ConfirmModal />
 </Base>
@@ -26,16 +33,6 @@ import ConfirmModal from '../components/ConfirmModal.astro';
 <!-- is:global because the review UI is built at runtime via innerHTML (see <script>), which Astro's
      scoped styles never reach. Every rule is namespaced under .review-card so nothing leaks. -->
 <style is:global>
-  /* ── Near full-width card so the PDF is as large as possible ── */
-  .review-card { max-width: min(2200px, 100%); }
-
-  .review-card .section { padding: 20px 28px; border-top: 1px solid #f3f4f6; }
-  .review-card .blurb-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-right: 28px; }
-  .review-card .queue-count {
-    font-size: 12px; font-weight: 500; color: #1e40af; background: #dbeafe;
-    padding: 3px 10px; border-radius: 999px; white-space: nowrap; flex-shrink: 0;
-  }
-  .review-card .info { color: #6b7280; font-size: 13px; }
 
   /* ── PDF takes all remaining width; the form is a fixed narrow column ── */
   .review-card .split { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; }
@@ -54,7 +51,7 @@ import ConfirmModal from '../components/ConfirmModal.astro';
   }
   /* The overlay is persistent and toggled with [hidden]; flex would otherwise override display:none. */
   .review-card .pdf-loading[hidden] { display: none; }
-  .review-card .pdf-pane iframe { width: 100%; height: calc(100vh - 180px); min-height: 620px; border: 0; display: block; }
+  .review-card .pdf-pane iframe { width: 100%; height: calc(100vh - 300px); min-height: 620px; border: 0; display: block; }
   .review-card .pdf-open {
     display: block; padding: 9px 14px; font-size: 12px; color: #1e40af;
     text-decoration: none; border-top: 1px solid #e5e7eb; background: #fff;
@@ -76,9 +73,9 @@ import ConfirmModal from '../components/ConfirmModal.astro';
     display: inline-flex; align-items: center; gap: 5px;
     padding: 4px 10px; border-radius: 999px;
     font-size: 12px; font-weight: 500;
-    background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe;
+    background: var(--warning-bg); color: #92610a;
   }
-  .review-card .trust-badge.trusted { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+  .review-card .trust-badge.trusted { background: var(--good-bg); color: #0a7a0a; }
 
   /* Field groups with section label */
   .review-card .form-group {

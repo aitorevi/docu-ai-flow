@@ -1,40 +1,33 @@
 ---
 interface Props {
   title: string;
+  subtitle?: string;
 }
-const { title } = Astro.props;
+const { title, subtitle } = Astro.props;
 ---
-<div class="header">
-  <h1>{title}</h1>
-  <div class="status">
-    <span class="extractor-badge" id="extractor-badge" hidden></span>
-    <span class="dot" id="status-dot"></span>
-    <span id="status-text">Comprobando...</span>
+<header class="header">
+  <div>
+    <h1>{title}</h1>
+    {subtitle && <p class="header-sub">{subtitle}</p>}
   </div>
-</div>
+  <div class="status">
+    <span class="pill neutral" id="extractor-badge" hidden></span>
+    <span class="dot" id="status-dot"></span>
+    <span id="status-text">Comprobando…</span>
+  </div>
+</header>
 
 <style>
-  /* Which extractor is bound to the port, visible at all times. It is the single most useful
-     thing to know about a running instance, and a misconfigured provider is otherwise silent. */
-  .extractor-badge {
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 999px;
-    white-space: nowrap;
-    margin-right: 8px;
+  .header-sub {
+    margin-top: 4px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
   }
-  .extractor-badge.local { background: #dcfce7; color: #166534; }
-  .extractor-badge.cloud { background: #dbeafe; color: #1e40af; }
 </style>
 
 <script>
-  interface Health {
-    status: string;
-    extractor?: string;
-    invoiceCount?: number;
-    pendingReview?: number;
-  }
+  interface Health { status: string; extractor?: string; pendingReview?: number }
 
   async function checkStatus(): Promise<void> {
     const dot = document.getElementById('status-dot');
@@ -45,19 +38,23 @@ const { title } = Astro.props;
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = (await r.json()) as Health;
 
-      dot.style.background = '#86efac';
-      text.textContent =
-        `Watcher activo · ${data.invoiceCount ?? 0} facturas · ${data.pendingReview ?? 0} por revisar`;
+      dot.style.background = 'var(--good)';
+      const pending = data.pendingReview ?? 0;
+      text.textContent = pending === 0
+        ? 'Watcher activo · nada por revisar'
+        : `Watcher activo · ${pending} por revisar`;
 
+      // Which extractor is bound to the port. A misconfigured provider is otherwise
+      // invisible until invoices start failing, so it lives in the header permanently.
       const badge = document.getElementById('extractor-badge');
       if (badge && data.extractor) {
         const isLocal = data.extractor === 'Template';
         badge.textContent = isLocal ? 'Extracción local' : 'Document AI';
-        badge.className = `extractor-badge ${isLocal ? 'local' : 'cloud'}`;
+        badge.className = `pill ${isLocal ? 'good' : 'info'}`;
         badge.hidden = false;
       }
     } catch {
-      dot.style.background = '#fca5a5';
+      dot.style.background = 'var(--critical)';
       text.textContent = 'Sin conexión';
     }
   }
