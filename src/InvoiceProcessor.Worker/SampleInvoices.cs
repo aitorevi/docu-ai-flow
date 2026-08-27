@@ -1,8 +1,4 @@
 using System.Globalization;
-using UglyToad.PdfPig.Content;
-using UglyToad.PdfPig.Core;
-using UglyToad.PdfPig.Fonts.Standard14Fonts;
-using UglyToad.PdfPig.Writer;
 
 namespace InvoiceProcessor.Worker;
 
@@ -21,32 +17,49 @@ public static class SampleInvoices
     // ShippedDemoTemplatesTests, so a broken sample fails the build rather than the demo.
     public sealed record Sample(string FileName, string Text, bool Extracts, string Expectation);
 
-    // ── Layout 1 — plain "label: value" lines, Spanish number and date formats ──
+    // Each supplier gets a different look on purpose: three layouts with nothing in common is
+    // the whole point of a template-based extractor. The markers (#, ---, tab, |) are layout
+    // only — see SampleInvoiceRenderer for why they never reach the extracted text.
+
+    // ── Layout 1 — a classic Spanish invoice: label on the left, amount flush right ──
     public static string Aurora(string number, string issue, string due, decimal net, decimal tax) =>
-        "SUMINISTROS AURORA S.L.\n" +
+        "# SUMINISTROS AURORA S.L.\n" +
+        "> Poligono Las Salinas, nave 7 - 46940 Manises (Valencia)\n" +
         "CIF: B12345674\n" +
-        $"Factura Nº: {number}\n" +
-        $"Fecha: {issue}\n" +
-        $"Vencimiento: {due}\n" +
-        $"Base imponible: {Es(net)}\n" +
-        $"IVA 21%: {Es(tax)}\n" +
-        $"Total factura: {Es(net + tax)}\n";
+        "---\n" +
+        "## FACTURA\n" +
+        $"Factura N\u00ba:\t{number}\n" +
+        $"Fecha:\t{issue}\n" +
+        $"Vencimiento:\t{due}\n" +
+        "---\n" +
+        "## DETALLE\n" +
+        $"Material de oficina y consumibles\t{Es(net)}\n" +
+        "---\n" +
+        $"Base imponible:\t{Es(net)}\n" +
+        $"IVA 21%:\t{Es(tax)}\n" +
+        $"Total factura:\t{Es(net + tax)}\n";
 
-    // ── Layout 2 — a column table: the values sit on the line *after* the header ──
+    // ── Layout 2 — a utility bill: column tables, values on the line *after* the header ──
     public static string Boreal(string number, string issue, string due, decimal net, decimal tax) =>
-        "ENERGIA BOREAL S.A.\n" +
+        "# ENERGIA BOREAL S.A.\n" +
+        "> Suministro electrico - Atencion al cliente 900 123 456\n" +
         "A87654321\n" +
-        "Documento Fecha Vencimiento\n" +
-        $"{number} {issue} {due}\n" +
-        "BASE IVA TOTAL\n" +
-        $"{Es(net)} {Es(tax)} {Es(net + tax)}\n";
+        "---\n" +
+        "Documento | Fecha | Vencimiento\n" +
+        $"{number} | {issue} | {due}\n" +
+        "---\n" +
+        "BASE | IVA | TOTAL\n" +
+        $"{Es(net)} | {Es(tax)} | {Es(net + tax)}\n";
 
-    // ── Layout 3 — dot leaders, US number format, English abbreviated month ──
+    // ── Layout 3 — a minimal English invoice with dot leaders and US number formats ──
     public static string Cronos(string number, string issue, decimal net, decimal tax) =>
-        "PAPELERIA CRONOS S.L.U.\n" +
+        "# PAPELERIA CRONOS S.L.U.\n" +
+        "> Stationery and print - VAT registered in Spain\n" +
         "NIF B55512345\n" +
+        "---\n" +
         $"Invoice no. ....... {number}\n" +
         $"Issue date ........ {issue}\n" +
+        "---\n" +
         $"Net .............. {Us(net)}\n" +
         $"VAT (21%) ........ {Us(tax)}\n" +
         $"Amount due ....... {Us(net + tax)}\n";
@@ -59,13 +72,16 @@ public static class SampleInvoices
 
     // No template has been written for this supplier: the extractor must refuse to guess.
     public const string UnknownSupplierText =
-        "TRANSPORTES DESCONOCIDOS S.L.\n" +
+        "# TRANSPORTES DESCONOCIDOS S.L.\n" +
+        "> Transporte y paqueteria\n" +
         "CIF B99999999\n" +
-        "Numero de factura: TD-2026-77\n" +
-        "Fecha de emision: 03/03/2026\n" +
-        "Base imponible: 371,90\n" +
-        "IVA 21%: 78,10\n" +
-        "Importe total: 450,00\n";
+        "---\n" +
+        "Numero de factura:\tTD-2026-77\n" +
+        "Fecha de emision:\t03/03/2026\n" +
+        "---\n" +
+        "Base imponible:\t371,90\n" +
+        "IVA 21%:\t78,10\n" +
+        "Importe total:\t450,00\n";
 
     public static IReadOnlyList<Sample> All =>
     [
@@ -102,7 +118,7 @@ public static class SampleInvoices
 
         // A scan: a valid PDF with no text layer at all. PdfPig recovers nothing from it, so it
         // exercises the OCR fallback when enabled and manual entry when not.
-        await File.WriteAllBytesAsync(Path.Combine(outputDir, "escaneo-sin-texto.pdf"), RenderImageOnlyPage());
+        await File.WriteAllBytesAsync(Path.Combine(outputDir, "escaneo-sin-texto.pdf"), SampleInvoiceRenderer.RenderScan());
         Console.WriteLine($"{"escaneo-sin-texto.pdf",-32} sin capa de texto → OCR o alta manual");
 
         Console.WriteLine();
@@ -110,32 +126,9 @@ public static class SampleInvoices
         return 0;
     }
 
-    // Builds a single-page PDF whose text layer contains exactly the given lines.
-    public static byte[] Render(string text)
-    {
-        var builder = new PdfDocumentBuilder();
-        var page = builder.AddPage(PageSize.A4);
-        var font = builder.AddStandard14Font(Standard14Font.Helvetica);
-
-        var y = 750;
-        foreach (var line in text.Split('\n'))
-        {
-            if (line.Length > 0) page.AddText(line, 10, new PdfPoint(50, y), font);
-            y -= 18;
-        }
-
-        return builder.Build();
-    }
-
-    // A page with geometry but no text — the shape of a scanned document.
-    private static byte[] RenderImageOnlyPage()
-    {
-        var builder = new PdfDocumentBuilder();
-        var page = builder.AddPage(PageSize.A4);
-        page.DrawRectangle(new PdfPoint(50, 600), 500, 180, 1);
-        page.DrawRectangle(new PdfPoint(50, 400), 500, 150, 1);
-        return builder.Build();
-    }
+    // Lays the text out as an invoice. The extractor reads back exactly these lines — see
+    // SampleInvoiceRenderer for the invariant that makes that true.
+    public static byte[] Render(string text) => SampleInvoiceRenderer.Render(text);
 
     private static readonly CultureInfo Spanish = CultureInfo.GetCultureInfo("es-ES");
     private static readonly CultureInfo English = CultureInfo.GetCultureInfo("en-US");
