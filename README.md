@@ -13,7 +13,11 @@ docker run --rm -v "$PWD/data:/app/data" ghcr.io/aitorevi/docu-ai-flow:latest ma
 docker run --rm -p 8080:8080 -v "$PWD/data:/app/data" ghcr.io/aitorevi/docu-ai-flow:latest
 ```
 
-Then open **http://localhost:8080**. The first command writes five fictional invoices into the inbox; the second starts the watcher, extracts what it can, and parks the rest at **`/review`** with the PDF beside the form.
+Then open **http://localhost:8080**. The first command writes eight fictional invoices into the inbox; the second starts the watcher, extracts what it can, and parks the rest at **`/review`** with the PDF beside the form.
+
+![The panel: four headline numbers and a trust meter per supplier](docs/img/panel.png)
+
+Three of those invoices come from the same supplier on purpose. Confirm all three without changing anything and you watch that supplier cross from **En revisión** to **Automático** — after which its invoices are filed without anyone looking at them. That is the whole idea of the project, and it takes about a minute to see.
 
 Two ideas carry the project: [pluggable extraction](#pluggable-extraction) behind a single port, and a [human in the loop](#human-in-the-loop) whose corrections decide which suppliers get to skip review.
 
@@ -165,17 +169,17 @@ cp data/samples/*.pdf data/inbox/          # running directly
 docker compose run --rm app make-samples /app/data/inbox   # under Docker
 ```
 
-Five fictional invoices, chosen to walk every interesting path:
+Eight fictional invoices, chosen to walk every interesting path:
 
 | File | What it exercises |
 |---|---|
-| `aurora-A-2026-0148.pdf` | `label: value` layout, Spanish numbers and dates → archived |
-| `boreal-FR-2026-0092.pdf` | column table, values on the line after the header → archived |
-| `cronos-C-26-0311.pdf` | dot leaders, US numbers, English month → archived |
+| `aurora-A-2026-*.pdf` (×3) | `label: value` layout, Spanish numbers and dates. **Three from one supplier**, so confirming them all walks it to *Automático* |
+| `boreal-FR-2026-*.pdf` (×2) | column table: the values sit on the line after the header |
+| `cronos-C-26-0311.pdf` | dot leaders, US numbers, English month |
 | `desconocido-TD-2026-77.pdf` | no template for this supplier → manual entry, not a guess |
 | `escaneo-sin-texto.pdf` | no text layer → OCR fallback, or manual entry when OCR is off |
 
-Regenerate them any time with `dotnet run --project src/InvoiceProcessor.Worker -- make-samples`.
+Regenerate them any time with `dotnet run --project src/InvoiceProcessor.Worker -- make-samples`. `ShippedDemoTemplatesTests` runs every one of them through the shipped templates, so a broken sample fails the build rather than the demo.
 
 ### The pipeline
 
@@ -198,7 +202,9 @@ From the dashboard you can:
 
 Extraction is never 100% right. The interesting question is not whether a person reviews the results, but **which invoices earn the right to skip review** — and that is decided per supplier, by track record.
 
-A supplier starts untrusted: every invoice of theirs waits in `data/pending/` and shows up at **`/review`**. After `Extraction:SupplierTrustThreshold` consecutive confirmations in which the reviewer changed *nothing* (20 by default), the supplier is trusted and its invoices are filed automatically. **One correction resets the counter to zero and revokes the trust.** Autonomy is earned, per supplier, and can be lost.
+A supplier starts untrusted: every invoice of theirs waits in `data/pending/` and shows up at **`/review`**. After `Extraction:SupplierTrustThreshold` consecutive confirmations in which the reviewer changed *nothing*, the supplier is trusted and its invoices are filed automatically. **One correction resets the counter to zero and revokes the trust.** Autonomy is earned, per supplier, and can be lost.
+
+`appsettings.json` ships **3** so the idea can be seen: at the real-world value of 20 someone trying the demo confirms an invoice, reads "1 de 20", and never witnesses a supplier become autonomous. Raise it to 20 when this is actually doing your books.
 
 The review screen puts the PDF next to the form:
 
@@ -355,7 +361,7 @@ All non-secret settings live in `src/InvoiceProcessor.Worker/appsettings.json`:
   "Extraction": {
     "Provider": "Template",
     "ConfidenceThreshold": 0.6,
-    "SupplierTrustThreshold": 20
+    "SupplierTrustThreshold": 3
   },
   "TemplateExtractor": {
     "MinTextLength": 50,
@@ -408,7 +414,7 @@ All non-secret settings live in `src/InvoiceProcessor.Worker/appsettings.json`:
 | `Resend:FromAddress` | Must belong to a domain verified in Resend (DKIM/SPF) |
 | `Resend:CcAddress` | Optional. When set, a copy of every advisor email is sent here |
 | `Extraction:ConfidenceThreshold` | Extractions with lower average confidence are moved to `failed/` |
-| `Extraction:SupplierTrustThreshold` | Consecutive corrections-free confirmations before a supplier's invoices are filed without review (default 20) |
+| `Extraction:SupplierTrustThreshold` | Consecutive corrections-free confirmations before a supplier's invoices are filed without review. Ships as `3` so the demo is watchable; use `20` for real use |
 | `MailDispatch:MaxAttachmentMb` | ZIP size limit before splitting by month (default 38 MB — Resend's hard limit is 40 MB) |
 
 ## Running tests
