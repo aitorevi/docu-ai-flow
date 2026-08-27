@@ -170,14 +170,19 @@ app.MapPost("/api/send/{year:int}/{quarter:int}", async (int year, int quarter,
     });
 });
 
-// Auto-open browser. Skipped when the output is redirected (CI, scripts) and when the API is
-// hosted in-process by the tests.
+// Auto-open browser. Skipped when the output is redirected (CI, containers, scripts) and when
+// the API is hosted in-process by the tests.
 if (!Console.IsInputRedirected && !app.Environment.IsEnvironment("Testing"))
 {
     _ = Task.Run(async () =>
     {
         await Task.Delay(1500);
-        try { Process.Start(new ProcessStartInfo("http://localhost:5000") { UseShellExecute = true }); }
+        // Read the address the server actually bound to — hardcoding a port sends people to the
+        // wrong URL as soon as ASPNETCORE_URLS says otherwise (the container listens on 8080).
+        var url = app.Urls.FirstOrDefault()?.Replace("http://+", "http://localhost")
+                          .Replace("http://0.0.0.0", "http://localhost")
+                  ?? "http://localhost:5000";
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
         catch { /* browser open is best-effort */ }
     });
 }
