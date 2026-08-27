@@ -112,6 +112,46 @@ public sealed class ShippedDemoTemplatesTests
             TemplateFieldParser.CheckAmountCoherence(net, tax, total).Kind);
     }
 
+    // ── Every shipped sample behaves as advertised ────────────────────────────
+
+    public static TheoryData<string> SampleFileNames()
+    {
+        var data = new TheoryData<string>();
+        foreach (var sample in SampleInvoices.All) data.Add(sample.FileName);
+        return data;
+    }
+
+    // A broken sample should fail the build, not someone's first run. This walks every file
+    // `make-samples` writes through the shipped templates and checks it does what the demo
+    // promises — including the extra Aurora and Boreal invoices, which exist so a supplier can
+    // actually be seen earning its autonomy.
+    [Theory]
+    [MemberData(nameof(SampleFileNames))]
+    public async Task EveryShippedSample_BehavesAsAdvertised(string fileName)
+    {
+        var sample = SampleInvoices.All.Single(s => s.FileName == fileName);
+
+        var result = await BuildExtractor().ExtractAsync(ToContent(sample.Text), CancellationToken.None);
+
+        Assert.Equal(sample.Extracts, !result.RequiresManualEntry);
+        if (!sample.Extracts) return;
+
+        // An extracted sample must also add up, or it would be rejected before ever reaching review.
+        Assert.Equal(CoherenceKind.Coherent, TemplateFieldParser.CheckAmountCoherence(
+            result.Fields["net_amount"].Value,
+            result.Fields["tax_amount"].Value,
+            result.Fields["total_amount"].Value).Kind);
+    }
+
+    [Fact]
+    public void TheSamples_IncludeEnoughFromOneSupplierToEarnTrust()
+    {
+        // Three invoices from the same supplier is what makes the headline idea reachable in a
+        // demo. If this ever drops below the shipped threshold, the demo stops telling the story.
+        var auroraCount = SampleInvoices.All.Count(s => s.Text.Contains("SUMINISTROS AURORA"));
+        Assert.True(auroraCount >= 3, $"Aurora aparece {auroraCount} vez/veces; hacen falta al menos 3.");
+    }
+
     // ── A supplier with no template must not be guessed at ────────────────────
 
     [Fact]
