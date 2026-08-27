@@ -13,6 +13,7 @@ public static class DependencyInjection
         services.AddOptions<MailDispatchSettings>();
         services.AddScoped<IProcessInvoiceUseCase, ProcessInvoiceService>();
         services.AddScoped<IReviewInvoiceUseCase, ReviewInvoiceService>();
+        services.AddScoped<IGetDashboardUseCase, GetDashboardService>();
         services.AddScoped<IExportQuarterToSpreadsheetUseCase, ExportQuarterToSpreadsheetService>();
         services.AddScoped<ISendQuarterToAdvisorUseCase, SendQuarterToAdvisorService>();
         return services;

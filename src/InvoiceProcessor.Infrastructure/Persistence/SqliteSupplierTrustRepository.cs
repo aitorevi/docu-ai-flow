@@ -38,6 +38,20 @@ public sealed class SqliteSupplierTrustRepository(IOptions<DatabaseOptions> opts
         return new SupplierTrust(reader.GetString(0), reader.GetInt32(1), reader.GetInt32(2) != 0);
     }
 
+    public async Task<IReadOnlyList<SupplierTrust>> ListAllAsync(CancellationToken ct)
+    {
+        await using var conn = Open();
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT tax_id, unmodified_count, is_trusted FROM supplier_trust;";
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        var result = new List<SupplierTrust>();
+        while (await reader.ReadAsync(ct))
+            result.Add(new SupplierTrust(reader.GetString(0), reader.GetInt32(1), reader.GetInt32(2) != 0));
+        return result;
+    }
+
     public async Task SaveAsync(SupplierTrust trust, CancellationToken ct)
     {
         await using var conn = Open();
