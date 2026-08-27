@@ -1,0 +1,27 @@
+# .NET build artifacts
+**/bin/
+**/obj/
+
+# Frontend dependencies and build output — the image builds both from source
+frontend/node_modules/
+frontend/.astro/
+src/InvoiceProcessor.Worker/wwwroot/
+
+# Tests are run by CI before the image is built, not inside it
+tests/
+
+# Runtime data is bind-mounted, never baked into the image
+data/
+*.db
+*.log
+
+# Secrets
+.env
+
+.git/
+.github/
+workflow/
+docs/
+
+.DS_Store
+**/*.user

@@ -1,0 +1,34 @@
+services:
+  app:
+    # Pull the CI-built image:   docker compose pull && docker compose up -d
+    # Or build it yourself:      docker compose up -d --build
+    build: .
+    image: ghcr.io/aitorevi/docu-ai-flow:latest
+
+    ports:
+      # The aspnet base image listens on 8080. Deliberately not 5000: on macOS that
+      # port belongs to the AirPlay receiver, and "port already in use" is a poor
+      # first impression for a project whose whole point is that it just runs.
+      - "8080:8080"
+
+    # Optional. With no .env at all the app runs on the local template extractor,
+    # offline and for free — which is the default demo. Add one to switch to
+    # Document AI, enable OCR, or send email through Resend.
+    env_file:
+      - path: .env
+        required: false
+
+    volumes:
+      # Host ./data (or wherever DATA_DIR points) becomes /app/data in the container,
+      # so the folder layout is identical on both sides: data/inbox, data/pending,
+      # data/archive… and the SQLite database live on the host and survive the container.
+      - "${DATA_DIR:-./data}:/app/data"
+
+    restart: on-failure
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
