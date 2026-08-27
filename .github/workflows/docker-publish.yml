@@ -1,0 +1,80 @@
+name: Publish Docker image
+
+on:
+  push:
+    branches:
+      - '**'
+    # Docs-only pushes do not change the image.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'workflow/**'
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # The image is gated on the suite. Two categories are excluded: the OCR test shells
+  # out to poppler/tesseract, and the Document AI test calls the real Google API —
+  # neither is available on a runner. Run them locally with --filter Category=…
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Test
+        run: dotnet test docu-ai-flow.sln --filter "Category!=RequiresTesseract&Category!=LiveGcp"
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # arm64 is emulated here, which makes that half of the build slow. It is worth it:
+      # the point of publishing this image is that anyone can `docker run` it, and half
+      # the people who will try are on an Apple Silicon Mac.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      # The default buildx "docker" driver can neither build multi-platform images nor
+      # export a gha cache; the docker-container driver this sets up can do both.
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
