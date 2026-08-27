@@ -6,7 +6,14 @@ Drop a PDF into `./data/inbox/`. The service detects it, extracts the invoice fi
 
 Built with **.NET 10**, **C#**, and a strict **hexagonal architecture**. Business errors use the **Result pattern** (`SharpMonads.Core`); infrastructure failures bubble up to Polly.
 
-**It runs with no accounts and no API keys.** Clone it, drop the sample invoices in `data/samples/` into the inbox, and watch the whole pipeline work — extraction, review screen and all.
+**It runs with no accounts and no API keys.** One command, no clone required:
+
+```bash
+docker run --rm -v "$PWD/data:/app/data" ghcr.io/aitorevi/docu-ai-flow:latest make-samples /app/data/inbox
+docker run --rm -p 8080:8080 -v "$PWD/data:/app/data" ghcr.io/aitorevi/docu-ai-flow:latest
+```
+
+Then open **http://localhost:8080**. The first command writes five fictional invoices into the inbox; the second starts the watcher, extracts what it can, and parks the rest at **`/review`** with the PDF beside the form.
 
 Two ideas carry the project: [pluggable extraction](#pluggable-extraction) behind a single port, and a [human in the loop](#human-in-the-loop) whose corrections decide which suppliers get to skip review.
 
@@ -77,7 +84,32 @@ Only the first one is mandatory. Everything else buys an optional capability.
 
 ## Setup
 
-### Windows (recommended path: `C:\docu-ai-flow`)
+### Docker (recommended — identical on macOS, Windows and Linux)
+
+Needs a Docker engine with `docker compose`: OrbStack or Docker Desktop on macOS, Docker Desktop or Docker Engine under WSL2 on Windows.
+
+```bash
+git clone https://github.com/aitorevi/docu-ai-flow
+cd docu-ai-flow
+docker compose run --rm app make-samples /app/data/inbox   # optional: the demo invoices
+docker compose up -d
+open http://localhost:8080
+```
+
+That is the whole setup. No `.env`, no accounts, no .NET or Node on the machine.
+
+| | |
+|---|---|
+| Port | `8080`. Not 5000 — on macOS that port belongs to the AirPlay receiver |
+| Data | `./data` on the host is `/app/data` in the container: same layout on both sides, and the SQLite database survives the container |
+| Elsewhere | Point `DATA_DIR` at another folder in `.env` |
+| Update | `docker compose pull && docker compose up -d` |
+| Logs / stop | `docker compose logs -f` · `docker compose down` |
+| Config | Add a `.env` only to switch to Document AI, enable OCR, or send email — see [Configuration](#configuration). Without one the app uses the local extractor |
+
+The image ships poppler and Tesseract, so enabling the OCR fallback is a config flag rather than a rebuild.
+
+### Windows, without Docker (recommended path: `C:\docu-ai-flow`)
 
 Clone to a path without spaces, then run the setup script once:
 
@@ -89,29 +121,30 @@ git config core.hooksPath .githooks
 
 Right-click `setup.ps1` → **Run with PowerShell**. It will:
 - Verify that .NET 10 SDK is installed (shows the download link if missing)
-- Create the `data\inbox`, `data\archive`, `data\failed`, `data\output` folders
-- Copy `.env.example` → `.env` and print instructions for filling in the API keys
+- Create the `data\inbox`, `data\pending`, `data\archive`, `data\duplicates`, `data\failed`, `data\output` folders
+- Copy `.env.example` → `.env`
 
-Edit `.env` with your keys (see [Configuration](#configuration)), then double-click **`run.bat`** to start.
+The `.env` is optional — without it the app uses the local extractor. See [Configuration](#configuration). Double-click **`run.bat`** to start.
 
 To update the app later: double-click **`update.bat`** (runs `git pull`), then `run.bat` again.
 
-### macOS / Linux
+### macOS / Linux, without Docker
 
 ```bash
 git clone https://github.com/aitorevi/docu-ai-flow
 cd docu-ai-flow
 git config core.hooksPath .githooks
 dotnet restore
-cp .env.example .env   # fill in your API keys
 dotnet run --project src/InvoiceProcessor.Worker
 ```
+
+`.env` is optional — copy `.env.example` only if you want Document AI, OCR or email.
 
 ## Usage
 
 ### Web dashboard (default mode)
 
-Starting the app opens a browser at `http://localhost:5000`: a panel for exporting and sending, and **`/review`** for the invoices waiting on a human.
+Starting the app opens a browser — `http://localhost:8080` under Docker, `http://localhost:5000` when run directly — with a panel for exporting and sending, and **`/review`** for the invoices waiting on a human.
 
 ```bash
 # Windows: double-click run.bat
@@ -128,7 +161,8 @@ lsof -ti :5000 | xargs kill -9
 ### Try it with no configuration at all
 
 ```bash
-cp data/samples/*.pdf data/inbox/
+cp data/samples/*.pdf data/inbox/          # running directly
+docker compose run --rm app make-samples /app/data/inbox   # under Docker
 ```
 
 Five fictional invoices, chosen to walk every interesting path:
@@ -200,6 +234,8 @@ The fiscal quarter rule (Sistema 2) is applied: Q1 2026 covers 01-Oct-2025 → 3
 ```
 docu-ai-flow.sln
 Directory.Build.props          # net10.0, Nullable, TreatWarningsAsErrors, SharpMonads.Core
+Dockerfile                     # astro build → dotnet publish → aspnet + poppler/tesseract
+docker-compose.yml             # port 8080, ./data bind-mounted, optional .env
 src/
 ├── InvoiceProcessor.Domain/          # Zero external dependencies
 │   ├── Invoices/                     # Invoice, Money, Supplier, SupplierTrust, InvoiceLine, InvoiceId
