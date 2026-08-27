@@ -125,21 +125,40 @@ if (args is ["export", var ey, var eq] &&
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-app.MapGet("/api/health", async (
-    IProcessedInvoiceRepository repository, IReviewInvoiceUseCase review, CancellationToken ct) =>
+// Deliberately cheap: this is polled from every page for the nav badge. Anything that needs
+// to walk the whole archive belongs in /api/dashboard.
+app.MapGet("/api/health", async (IReviewInvoiceUseCase review, CancellationToken ct) => Results.Ok(new
 {
-    var invoiceCount = 0;
-    await foreach (var _ in repository.ListAllAsync(ct)) invoiceCount++;
+    status = "running",
+    // Which extractor is actually bound to the port. Worth surfacing: a misconfigured
+    // Extraction:Provider is otherwise invisible until invoices start failing.
+    extractor = activeProvider.ToString(),
+    // Drives the review badge — the only number in the UI that asks the user to act.
+    pendingReview = (await review.GetPendingAsync(ct)).Count,
+}));
 
+// Everything the panel shows in one round trip.
+app.MapGet("/api/dashboard", async (IGetDashboardUseCase dashboard, CancellationToken ct) =>
+{
+    var summary = await dashboard.ExecuteAsync(ct);
     return Results.Ok(new
     {
-        status = "running",
-        // Which extractor is actually bound to the port. Worth surfacing: a misconfigured
-        // Extraction:Provider is otherwise invisible until invoices start failing.
-        extractor = activeProvider.ToString(),
-        invoiceCount,
-        // Drives the review badge — the only number in the UI that asks the user to act.
-        pendingReview = (await review.GetPendingAsync(ct)).Count,
+        extractor        = activeProvider.ToString(),
+        pendingReview    = summary.PendingReview,
+        archivedInvoices = summary.ArchivedInvoices,
+        totalAmount      = summary.TotalAmount,
+        currency         = summary.Currency,
+        trustThreshold   = summary.TrustThreshold,
+        trustedSuppliers = summary.Suppliers.Count(s => s.IsTrusted),
+        suppliers        = summary.Suppliers.Select(s => new
+        {
+            name            = s.Name,
+            taxId           = s.TaxId,
+            archivedCount   = s.ArchivedCount,
+            pendingCount    = s.PendingCount,
+            unmodifiedCount = s.UnmodifiedCount,
+            isTrusted       = s.IsTrusted,
+        }),
     });
 });
 
