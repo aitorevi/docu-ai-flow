@@ -68,12 +68,15 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha
 
+      # Build on every branch — that is what catches a broken Dockerfile before the
+      # merge — but only publish from the default branch, so the registry never holds
+      # an image built from unreviewed code.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ github.ref_name == github.event.repository.default_branch }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
